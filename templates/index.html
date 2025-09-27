@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam/Buff 爬虫</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+        }
+        .sidebar {
+            width: 200px;
+            background-color: #1a237e;
+            color: white;
+            padding: 20px 0;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .sidebar h2 {
+            margin-top: 0;
+        }
+        .sidebar a {
+            display: block;
+            width: 100%;
+            padding: 15px 20px;
+            color: #b0b0b0;
+            text-decoration: none;
+            transition: background-color 0.3s;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        .sidebar a:hover {
+            background-color: #3f51b5;
+        }
+        .sidebar .active {
+            background-color: #3949ab;
+            color: white;
+        }
+        .main-content {
+            margin-left: 200px;
+            width: calc(100% - 200px);
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .page {
+            display: none;
+        }
+        .page.active {
+            display: block;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="number"], textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .radio-group label {
+            display: inline-block;
+            margin-right: 15px;
+            font-weight: normal;
+        }
+        .radio-group input {
+            margin-right: 5px;
+        }
+        .crawler-toggle-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .crawler-toggle-button.stop {
+            background-color: #dc3545;
+        }
+        .crawler-toggle-button:hover {
+            opacity: 0.8;
+        }
+        .test-button {
+            background-color: #008CBA;
+        }
+        .test-button:hover {
+            background-color: #007ba7;
+        }
+        .log-box {
+            background-color: #e9ecef;
+            border: 1px solid #ced4da;
+            padding: 15px;
+            height: 200px;
+            overflow-y: scroll;
+            margin-top: 20px;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: #f2f2f2;
+            cursor: pointer;
+            position: relative;
+        }
+        .data-table th:after {
+            content: ' ';
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 5px solid transparent;
+        }
+        .data-table th.asc:after {
+            border-bottom-color: #333;
+        }
+        .data-table th.desc:after {
+            border-top-color: #333;
+        }
+        .data-table td a {
+            text-decoration: none;
+            color: #007bff;
+        }
+        .data-table td a:hover {
+            text-decoration: underline;
+        }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+        }
+        .status-badge.success {
+            background-color: #28a745;
+        }
+        .status-badge.error {
+            background-color: #dc3545;
+        }
+        .flex-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .error-message {
+            color: #dc3545;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+        .pagination {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+            margin-top: 20px;
+        }
+        .pagination button {
+            background-color: #f0f0f0;
+            color: #333;
+            border: 1px solid #ccc;
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .pagination button:hover:not(.active) {
+            background-color: #e0e0e0;
+        }
+        .pagination button.active {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .pagination input {
+            width: 50px;
+            text-align: center;
+        }
+        .data-stats {
+            margin-bottom: 10px;
+            color: #555;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <a href="#" data-page="overview" class="active">概览</a>
+    <a href="#" data-page="settings">设置</a>
+    <a href="#" data-page="data">数据</a>
+</div>
+
+<div class="main-content">
+
+    <div id="overview-page" class="page active">
+        <h1>概览</h1>
+        <div class="container">
+            <h2>网络连通性测试</h2>
+            <div class="form-group">
+                <label for="proxy-url">代理地址:</label>
+                <input type="text" id="proxy-url" value="http://127.0.0.1:7897">
+                <button onclick="testConnection()" class="test-button">测试连通性</button>
+            </div>
+            <div class="log-box" id="test-log-box">
+                <h3>测试日志</h3>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-page" class="page">
+        <h1>设置</h1>
+        <div class="container">
+            <div class="section">
+                <h2>爬虫配置</h2>
+                <div class="form-group">
+                    <label for="max-threads">最大线程数:</label>
+                    <input type="number" id="max-threads" value="2" min="1">
+                </div>
+                <div class="form-group">
+                    <label>游戏类型:</label>
+                    <div class="radio-group">
+                        <label><input type="radio" name="game-type" value="CSGO" checked> CSGO</label>
+                        <label><input type="radio" name="game-type" value="DOTA2"> DOTA2</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="min-sell-count">BUFF 最小销售数:</label>
+                    <input type="number" id="min-sell-count" value="20" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="min-sell-price">BUFF 最小销售价格:</label>
+                    <input type="number" id="min-sell-price" value="25" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="max-sell-price">BUFF 最大销售价格:</label>
+                    <input type="number" id="max-sell-price" value="300" min="0">
+                </div>
+            </div>
+            <div class="section">
+                <h2>账号配置</h2>
+                <div class="form-group">
+                    <label for="buff-session">BUFF Session:</label>
+                    <textarea id="buff-session" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="steam-cookies">Steam Cookies:</label>
+                    <textarea id="steam-cookies" rows="3"></textarea>
+                </div>
+                <h2>站点配置</h2>
+                <div class="form-group">
+                    <label><input type="checkbox" id="web-auth"> 开启网页验证</label>
+                </div>
+            </div>
+        </div>
+        <button id="crawler-toggle-btn" class="crawler-toggle-button" onclick="toggleCrawler()">开启爬虫</button>
+        <div class="log-box" id="crawler-log-box">
+            <h3>爬虫日志</h3>
+        </div>
+    </div>
+
+    <div id="data-page" class="page">
+        <h1>数据查询</h1>
+        <div class="container">
+            <div class="flex-container">
+                <h2>数据</h2>
+                <div>
+                    <button onclick="fetchData()">刷新</button>
+                    <button onclick="clearData()" style="background-color: #6c757d;">清空列表</button>
+                </div>
+            </div>
+            <div class="data-stats">
+                总条数: <span id="total-items">0</span> |
+                每页显示: <span id="items-per-page">20</span> |
+                当前页条数: <span id="current-page-items">0</span>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th data-sort-key="name">名称</th>
+                        <th>链接</th>
+                        <th data-sort-key="buff_sell_price">BUFF 出售价 (¥)</th>
+                        <th data-sort-key="steam_sell_price">Steam 出售价 (¥)</th>
+                        <th data-sort-key="steam_buy_ratio">求购价比例</th>
+                        <th data-sort-key="steam_sell_ratio">出售价比例</th>
+                        <th data-sort-key="buff_sell_num">BUFF 在售数</th>
+                        <th data-sort-key="steam_sell_num">Steam 在售数</th>
+                        <th data-sort-key="steam_volume">Steam 成交量</th>
+                        <th data-sort-key="update_time">更新时间</th>
+                    </tr>
+                </thead>
+                <tbody id="data-table-body">
+                    <tr><td colspan="10" style="text-align: center;">暂无数据</td></tr>
+                </tbody>
+            </table>
+            <div class="pagination" id="pagination-container"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const logBox = document.getElementById('crawler-log-box');
+    const testLogBox = document.getElementById('test-log-box');
+    const dataTableBody = document.getElementById('data-table-body');
+    const paginationContainer = document.getElementById('pagination-container');
+    const totalItemsSpan = document.getElementById('total-items');
+    const itemsPerPageSpan = document.getElementById('items-per-page');
+    const currentPageItemsSpan = document.getElementById('current-page-items');
+    const toggleButton = document.getElementById('crawler-toggle-btn');
+
+    const ITEMS_PER_PAGE = 20;
+
+    let dataInterval = null;
+    let statusInterval = null;
+    let allData = [];
+    let currentPage = 1;
+    let sortDirection = {};
+
+    itemsPerPageSpan.textContent = ITEMS_PER_PAGE;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadConfig();
+        checkCrawlerStatus();
+        statusInterval = setInterval(checkCrawlerStatus, 5000);
+    });
+    document.querySelectorAll('.sidebar a').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const pageId = e.target.getAttribute('data-page');
+            document.querySelectorAll('.sidebar a').forEach(nav => nav.classList.remove('active'));
+            e.target.classList.add('active');
+            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+            document.getElementById(`${pageId}-page`).classList.add('active');
+        });
+    });
+
+    document.querySelectorAll('.data-table th').forEach(header => {
+        header.addEventListener('click', () => {
+            const key = header.getAttribute('data-sort-key');
+            if (key) {
+                const currentDir = sortDirection[key] === 'asc' ? 'desc' : 'asc';
+                sortDirection = {};
+                sortDirection[key] = currentDir;
+                sortData(key, currentDir);
+                renderTable();
+
+                document.querySelectorAll('.data-table th').forEach(th => {
+                    th.classList.remove('asc', 'desc');
+                });
+                header.classList.add(currentDir);
+            }
+        });
+    });
+
+    function sortData(key, direction) {
+        allData.sort((a, b) => {
+            const valA = getValueByKey(a, key);
+            const valB = getValueByKey(b, key);
+
+            if (typeof valA === 'number' && typeof valB === 'number') {
+                return direction === 'asc' ? valA - valB : valB - valA;
+            } else {
+                const strA = String(valA).toLowerCase();
+                const strB = String(valB).toLowerCase();
+                if (strA < strB) return direction === 'asc' ? -1 : 1;
+                if (strA > strB) return direction === 'asc' ? 1 : -1;
+                return 0;
+            }
+        });
+    }
+
+    function getValueByKey(item, key) {
+        // Handle calculated values
+        if (key === 'steam_sell_ratio') {
+            const ratio = item.buff_sell_price / (item.steam_sell_price * 0.85);
+            return isNaN(ratio) || !isFinite(ratio) ? 0 : parseFloat(ratio.toFixed(2));
+        }
+        if (key === 'steam_buy_ratio') {
+            const ratio = item.buff_buy_price / (item.steam_buy_price * 1.15);
+            return isNaN(ratio) || !isFinite(ratio) ? 0 : parseFloat(ratio.toFixed(2));
+        }
+        // Handle missing keys gracefully for sorting
+        return item[key] !== undefined && item[key] !== null ? item[key] : (key === 'name' ? '' : 0);
+    }
+
+    function saveConfig() {
+        const config = getFormConfig();
+        localStorage.setItem('crawler_config', JSON.stringify(config));
+        log('配置已自动保存。', 'crawler');
+    }
+
+    function loadConfig() {
+        const savedConfig = localStorage.getItem('crawler_config');
+        if (savedConfig) {
+            const config = JSON.parse(savedConfig);
+            document.getElementById('proxy-url').value = config.proxy_url || '';
+            document.getElementById('max-threads').value = config.max_threads || '2';
+            document.getElementById('min-sell-count').value = config.min_sell_count || '20';
+            document.getElementById('min-sell-price').value = config.min_sell_price || '25';
+            document.getElementById('max-sell-price').value = config.max_sell_price || '300';
+            document.getElementById('buff-session').value = config.buff_session || '';
+            document.getElementById('steam-cookies').value = config.steam_cookies || '';
+            document.getElementById('web-auth').checked = config.web_auth || false;
+            document.querySelector(`input[name="game-type"][value="${config.game_type}"]`).checked = true;
+            log('已加载上次保存的配置。', 'crawler');
+        }
+    }
+
+    function log(message, type) {
+        const p = document.createElement('p');
+        p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        if (type === 'crawler') {
+            logBox.appendChild(p);
+            logBox.scrollTop = logBox.scrollHeight;
+        } else {
+            testLogBox.appendChild(p);
+            testLogBox.scrollTop = testLogBox.scrollHeight;
+        }
+    }
+
+    async function testConnection() {
+        log('正在测试网络连通性...', 'test');
+        try {
+            const response = await fetch('/api/test_connection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(getFormConfig())
+            });
+            const result = await response.json();
+
+            if (result.buff.success) {
+                log('Buff 市场连接成功。', 'test');
+            } else {
+                log(`Buff 市场连接失败: ${result.buff.message}`, 'test');
+            }
+
+            if (result.steam.success) {
+                log('Steam 市场连接成功。', 'test');
+            } else {
+                log(`Steam 市场连接失败: ${result.steam.message}`, 'test');
+            }
+        } catch (error) {
+            log(`测试请求失败: ${error}`, 'test');
+        }
+    }
+
+    function getFormConfig() {
+        const gameType = document.querySelector('input[name="game-type"]:checked').value;
+        return {
+            proxy_url: document.getElementById('proxy-url').value,
+            max_threads: document.getElementById('max-threads').value,
+            game_type: gameType,
+            min_sell_count: document.getElementById('min-sell-count').value,
+            min_sell_price: document.getElementById('min-sell-price').value,
+            max_sell_price: document.getElementById('max-sell-price').value,
+            buff_session: document.getElementById('buff-session').value,
+            steam_cookies: document.getElementById('steam-cookies').value,
+            web_auth: document.getElementById('web-auth').checked
+        };
+    }
+
+    async function toggleCrawler() {
+        const status = await getCrawlerStatus();
+        if (status === 'running') {
+            await stopCrawler();
+        } else {
+            await startCrawler();
+        }
+    }
+
+    async function startCrawler() {
+        const config = getFormConfig();
+        log('正在启动爬虫...', 'crawler');
+
+        try {
+            const response = await fetch('/api/start_crawler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const result = await response.json();
+            log(result.message, 'crawler');
+
+            if (response.ok) {
+                updateToggleButton('running');
+                if (dataInterval) {
+                    clearInterval(dataInterval);
+                }
+                fetchData();
+                dataInterval = setInterval(fetchData, 2000);
+            }
+        } catch (error) {
+            log(`启动爬虫失败: ${error}`, 'crawler');
+        }
+    }
+
+    async function stopCrawler() {
+        log('正在停止爬虫...', 'crawler');
+        try {
+            const response = await fetch('/api/stop_crawler', { method: 'POST' });
+            const result = await response.json();
+            log(result.message, 'crawler');
+
+            if (response.ok) {
+                updateToggleButton('stopped');
+                clearInterval(dataInterval);
+            }
+        } catch (error) {
+            log(`停止爬虫失败: ${error}`, 'crawler');
+        }
+    }
+
+    async function getCrawlerStatus() {
+        try {
+            const response = await fetch('/api/status');
+            const result = await response.json();
+            return result.status;
+        } catch (error) {
+            console.error("Failed to get crawler status:", error);
+            return 'stopped';
+        }
+    }
+
+    function updateToggleButton(status) {
+        if (status === 'running') {
+            toggleButton.textContent = '停止爬虫';
+            toggleButton.classList.add('stop');
+        } else {
+            toggleButton.textContent = '开启爬虫';
+            toggleButton.classList.remove('stop');
+        }
+    }
+
+    async function checkCrawlerStatus() {
+        const status = await getCrawlerStatus();
+        updateToggleButton(status);
+        if (status === 'running' && !dataInterval) {
+            fetchData();
+            dataInterval = setInterval(fetchData, 2000);
+        } else if (status === 'stopped' && dataInterval) {
+            clearInterval(dataInterval);
+            dataInterval = null;
+        }
+    }
+
+    async function clearData() {
+        if (!confirm("确定要清空所有数据吗？此操作将永久删除本地文件。")) {
+            return;
+        }
+        log("正在清空数据...", 'crawler');
+        try {
+            const response = await fetch('/api/clear_data', { method: 'POST' });
+            const result = await response.json();
+            log(result.message, 'crawler');
+            if (response.ok) {
+                allData = [];
+                currentPage = 1;
+                renderTable();
+                renderPagination();
+                updateStats();
+            }
+        } catch (error) {
+            log(`清空数据失败: ${error}`, 'crawler');
+        }
+    }
+
+    async function fetchData() {
+        try {
+            const response = await fetch('/api/data');
+            const result = await response.json();
+            allData = result.data;
+            renderTable();
+            renderPagination();
+            updateStats();
+        } catch (error) {
+            log(`获取数据失败: ${error}`, 'crawler');
+        }
+    }
+
+    function updateStats() {
+        totalItemsSpan.textContent = allData.length;
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        const endIndex = startIndex + ITEMS_PER_PAGE;
+        const pageData = allData.slice(startIndex, endIndex);
+        currentPageItemsSpan.textContent = pageData.length;
+    }
+
+    function renderTable() {
+        dataTableBody.innerHTML = '';
+
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        const endIndex = startIndex + ITEMS_PER_PAGE;
+        const pageData = allData.slice(startIndex, endIndex);
+
+        if (pageData.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="10" style="text-align: center;">暂无数据</td>`;
+            dataTableBody.appendChild(row);
+            return;
+        }
+
+        pageData.forEach(item => {
+            const row = document.createElement('tr');
+            const buffLink = `https://buff.163.com/goods/${item.buff_id}`;
+            const steamLink = `https://steamcommunity.com/market/listings/${item.steam_market_id}`;
+
+            // Calculate ratios in frontend for display
+            const steamSellRatio = item.buff_sell_price && item.steam_sell_price ?
+                                    (item.buff_sell_price / (item.steam_sell_price * 0.85)).toFixed(2) : 'N/A';
+            const steamBuyRatio = item.buff_buy_price && item.steam_buy_price ?
+                                   (item.buff_buy_price / (item.steam_buy_price * 1.15)).toFixed(2) : 'N/A';
+
+
+            row.innerHTML = `
+                <td>${item.name || 'N/A'}</td>
+                <td><a href="${buffLink}" target="_blank">B</a> | <a href="${steamLink}" target="_blank">S</a></td>
+                <td>${item.buff_sell_price || 'N/A'}</td>
+                <td>${item.steam_sell_price || 'N/A'}</td>
+                <td>${steamBuyRatio}</td>
+                <td>${steamSellRatio}</td>
+                <td>${item.buff_sell_num || 'N/A'}</td>
+                <td>${item.steam_sell_num || 'N/A'}</td>
+                <td>${item.steam_volume || 'N/A'}</td>
+                <td>${item.update_time || 'N/A'}</td>
+            `;
+            dataTableBody.appendChild(row);
+        });
+    }
+
+    function renderPagination() {
+        paginationContainer.innerHTML = '';
+        const totalPages = Math.ceil(allData.length / ITEMS_PER_PAGE);
+
+        if (totalPages <= 1) {
+            addPageJumpInput(totalPages);
+            return;
+        }
+
+        let pagesToShow = new Set();
+        pagesToShow.add(1);
+
+        if (totalPages > 10) {
+            if (currentPage > 4) {
+                pagesToShow.add('...');
+            }
+            const start = Math.max(2, currentPage - 2);
+            const end = Math.min(totalPages - 1, currentPage + 2);
+            for (let i = start; i <= end; i++) {
+                pagesToShow.add(i);
+            }
+            if (currentPage < totalPages - 3) {
+                pagesToShow.add('...');
+            }
+        } else {
+            for (let i = 1; i <= totalPages; i++) {
+                pagesToShow.add(i);
+            }
+        }
+
+        pagesToShow.add(totalPages);
+
+        const sortedPages = Array.from(pagesToShow).sort((a, b) => {
+            if (a === '...') return -1;
+            if (b === '...') return 1;
+            return a - b;
+        });
+
+        sortedPages.forEach(page => {
+            if (page === '...') {
+                const span = document.createElement('span');
+                span.textContent = '...';
+                paginationContainer.appendChild(span);
+            } else {
+                const button = document.createElement('button');
+                button.textContent = page;
+                button.className = currentPage === page ? 'active' : '';
+                button.addEventListener('click', () => goToPage(page));
+                paginationContainer.appendChild(button);
+            }
+        });
+
+        addPageJumpInput(totalPages);
+    }
+
+    function addPageJumpInput(totalPages) {
+        const span = document.createElement('span');
+        span.textContent = `共 ${totalPages} 页, 跳到`;
+        paginationContainer.appendChild(span);
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = 1;
+        input.max = totalPages;
+        input.value = currentPage;
+        paginationContainer.appendChild(input);
+
+        const button = document.createElement('button');
+        button.textContent = '确定';
+        button.addEventListener('click', () => {
+            const pageNum = parseInt(input.value);
+            if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+                goToPage(pageNum);
+            }
+        });
+        paginationContainer.appendChild(button);
+    }
+
+    function goToPage(page) {
+        currentPage = page;
+        renderTable();
+        renderPagination();
+        updateStats();
+        log(`已跳转到第 ${page} 页。`, 'crawler');
+    }
+
+    // Initial fetch on page load
+    fetchData();
+</script>
+
+</body>
+</html>

@@ -50,6 +50,7 @@
             width: calc(100% - 200px);
             padding: 20px;
             box-sizing: border-box;
+            position: relative;
         }
         .page {
             display: none;
@@ -57,44 +58,50 @@
         .page.active {
             display: block;
         }
-                .navbar {
+        /* 修改后的导航栏样式 - 放到右上角 */
+        .navbar {
+            position: fixed;
+            top: 20px;
+            right: 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 10px 0;
-            margin-bottom: 30px;
+            padding: 10px 20px;
             border-radius: 8px;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
         .nav-container {
-            max-width: 1200px;
-            margin: 0 auto;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 0 20px;
+            gap: 15px;
         }
         .nav-brand {
             color: white;
-            font-size: 24px;
+            font-size: 18px;
             font-weight: bold;
             text-decoration: none;
+            margin-right: 10px;
         }
         .nav-menu {
             display: flex;
-            gap: 20px;
+            gap: 15px;
             align-items: center;
         }
         .nav-item {
             color: white;
             text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 5px;
+            padding: 6px 12px;
+            border-radius: 4px;
             transition: background-color 0.3s;
+            font-size: 14px;
+            cursor: pointer;
         }
         .nav-item:hover {
-            background-color: rgba(255,255,255,0.1);
+            background-color: rgba(255,255,255,0.2);
         }
         .user-info {
             color: white;
-            margin-right: 15px;
+            font-size: 14px;
+            margin-right: 10px;
         }
         .container {
             background-color: #ffffff;
@@ -102,6 +109,7 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             padding: 30px;
             margin-bottom: 20px;
+            margin-top: 80px; /* 为固定导航栏留出空间 */
         }
         .form-group {
             margin-bottom: 20px;
@@ -249,23 +257,41 @@
             color: #555;
             font-size: 14px;
         }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .navbar {
+                position: static;
+                top: auto;
+                right: auto;
+                margin-bottom: 20px;
+            }
+            .container {
+                margin-top: 20px;
+            }
+            .nav-container {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .nav-menu {
+                flex-direction: column;
+                gap: 8px;
+            }
+        }
     </style>
 </head>
 <body>
 
+    <!-- 修改后的导航栏 - 现在在右上角 -->
     <div class="navbar">
         <div class="nav-container">
-            <a href="{{ url_for('index') }}" class="nav-brand">爬虫控制系统</a>
-            <!-- 将你提供的代码块粘贴在这里，替换下面这个注释 -->
+            <a href="/" class="nav-brand">爬虫系统</a>
             <div class="nav-menu">
-                <span class="user-info">欢迎，{{ username }}</span>
-                <a href="{{ url_for('profile') }}" class="nav-item">个人资料</a>
-                {% if is_admin %}
-                <a href="{{ url_for('admin_users') }}" class="nav-item">用户管理</a>
-                {% endif %}
-                <a href="{{ url_for('logout') }}" class="nav-item">退出登录</a>
+                <span class="user-info">欢迎，用户</span>
+                <a href="/profile" class="nav-item">个人资料</a>
+                <a href="/admin" class="nav-item">用户管理</a>
+                <a href="#" class="nav-item" onclick="logout()">退出登录</a>
             </div>
-            <!-- 代码粘贴结束 -->
         </div>
     </div>
 
@@ -407,6 +433,7 @@
         checkCrawlerStatus();
         statusInterval = setInterval(checkCrawlerStatus, 5000);
     });
+
     document.querySelectorAll('.sidebar a').forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
@@ -435,6 +462,30 @@
             }
         });
     });
+
+    // 添加登出函数
+    function logout() {
+        if (confirm('确定要退出登录吗？')) {
+            // 这里可以调用后端API或直接跳转
+            fetch('/api/logout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            }).then(response => {
+                if (response.ok) {
+                    window.location.href = '/login';
+                } else {
+                    // 如果API调用失败，直接跳转到登录页
+                    window.location.href = '/login';
+                }
+            }).catch(error => {
+                console.error('Logout error:', error);
+                // 即使出错也跳转到登录页
+                window.location.href = '/login';
+            });
+        }
+    }
 
     function sortData(key, direction) {
         allData.sort((a, b) => {

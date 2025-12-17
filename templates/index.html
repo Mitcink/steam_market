@@ -57,6 +57,45 @@
         .page.active {
             display: block;
         }
+                .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 10px 0;
+            margin-bottom: 30px;
+            border-radius: 8px;
+        }
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+        }
+        .nav-brand {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        .nav-menu {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        .nav-item {
+            color: white;
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        .nav-item:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+        .user-info {
+            color: white;
+            margin-right: 15px;
+        }
         .container {
             background-color: #ffffff;
             border-radius: 8px;
@@ -214,21 +253,27 @@
 </head>
 <body>
 
+    <div class="navbar">
+        <div class="nav-container">
+            <a href="{{ url_for('index') }}" class="nav-brand">爬虫控制系统</a>
+            <!-- 将你提供的代码块粘贴在这里，替换下面这个注释 -->
+            <div class="nav-menu">
+                <span class="user-info">欢迎，{{ username }}</span>
+                <a href="{{ url_for('profile') }}" class="nav-item">个人资料</a>
+                {% if is_admin %}
+                <a href="{{ url_for('admin_users') }}" class="nav-item">用户管理</a>
+                {% endif %}
+                <a href="{{ url_for('logout') }}" class="nav-item">退出登录</a>
+            </div>
+            <!-- 代码粘贴结束 -->
+        </div>
+    </div>
+
 <div class="sidebar">
-    <!-- 在导航栏中添加 -->
-<div class="nav-menu">
-    <span class="user-info">欢迎，{{ username }}</span>
-    <a href="{{ url_for('profile') }}" class="nav-item">个人资料</a>
-    {% if is_admin %}
-    <a href="{{ url_for('admin_users') }}" class="nav-item">用户管理</a>
-    {% endif %}
-    <a href="{{ url_for('logout') }}" class="nav-item">退出登录</a>
-</div>
     <a href="#" data-page="overview" class="active">概览</a>
     <a href="#" data-page="settings">设置</a>
     <a href="#" data-page="data">数据</a>
 </div>
-
 
 <div class="main-content">
 

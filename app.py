@@ -11,7 +11,8 @@ import random
 
 app = Flask(__name__)
 
-DATA_FILE = 'crawled_data.json'
+DATA_DIR = 'data'
+DATA_FILE = os.path.join(DATA_DIR, 'crawled_data.json')
 crawled_data = []
 is_crawling = False
 crawler_thread = None
@@ -21,14 +22,17 @@ db_lock = threading.Lock()
 def load_data_from_file():
     """Load crawled data from a JSON file."""
     global crawled_data
+    # 确保数据目录存在
+    os.makedirs(DATA_DIR, exist_ok=True)
+
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            try:
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 crawled_data = json.load(f)
                 print(f"Loaded {len(crawled_data)} items from {DATA_FILE}")
-            except (json.JSONDecodeError, FileNotFoundError):
-                print(f"Error loading {DATA_FILE}, starting with empty data.")
-                crawled_data = []
+        except (json.JSONDecodeError, FileNotFoundError):
+            print(f"Error loading {DATA_FILE}, starting with empty data.")
+            crawled_data = []
     else:
         print(f"No {DATA_FILE} found, starting with empty data.")
 
@@ -343,5 +347,6 @@ def clear_data():
 
 
 if __name__ == '__main__':
+    os.makedirs('data', exist_ok=True)
     load_data_from_file()
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)

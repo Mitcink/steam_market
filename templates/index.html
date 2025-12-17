@@ -215,10 +215,20 @@
 <body>
 
 <div class="sidebar">
+    <!-- 在导航栏中添加 -->
+<div class="nav-menu">
+    <span class="user-info">欢迎，{{ username }}</span>
+    <a href="{{ url_for('profile') }}" class="nav-item">个人资料</a>
+    {% if is_admin %}
+    <a href="{{ url_for('admin_users') }}" class="nav-item">用户管理</a>
+    {% endif %}
+    <a href="{{ url_for('logout') }}" class="nav-item">退出登录</a>
+</div>
     <a href="#" data-page="overview" class="active">概览</a>
     <a href="#" data-page="settings">设置</a>
     <a href="#" data-page="data">数据</a>
 </div>
+
 
 <div class="main-content">
 
@@ -228,7 +238,7 @@
             <h2>网络连通性测试</h2>
             <div class="form-group">
                 <label for="proxy-url">代理地址:</label>
-                <input type="text" id="proxy-url" value="http://127.0.0.1:7897">
+                <input type="text" id="proxy-url" value="https://store.steampowered.com/">
                 <button onclick="testConnection()" class="test-button">测试连通性</button>
             </div>
             <div class="log-box" id="test-log-box">

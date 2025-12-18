@@ -365,6 +365,7 @@ def run_crawler(config):
     is_crawling = False
     print("爬虫已停止。")
 
+@app.route('/api/test_connection', methods=['POST'])
 def test_connection(url, cookies=None, proxy=None):
         try:
             proxies = {"http": proxy, "https": proxy} if proxy else None

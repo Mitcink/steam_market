@@ -365,7 +365,6 @@ def run_crawler(config):
     is_crawling = False
     print("爬虫已停止。")
 
-@app.route('/api/test_connection', methods=['POST'])
 def test_connection(url, cookies=None, proxy=None):
         try:
             proxies = {"http": proxy, "https": proxy} if proxy else None
@@ -375,6 +374,69 @@ def test_connection(url, cookies=None, proxy=None):
             return True, "连接成功"
         except requests.exceptions.RequestException as e:
             return False, str(e)
+
+
+# 新的API路由处理函数
+@app.route('/api/test_connection', methods=['POST'])
+def api_test_connection():
+    try:
+        # 获取前端发送的配置
+        config = request.get_json()
+        print(f"收到配置: {config}")
+
+        # 从配置中提取需要的参数
+        proxy_url = config.get('proxy_url')  # 注意：这里是proxy_url不是proxy
+        steam_cookies_str = config.get('steam_cookies')
+        buff_session = config.get('buff_session')
+
+        # 处理Steam cookies - 将字符串转换为字典
+        steam_cookies = {}
+        if steam_cookies_str:
+            try:
+                # 解析cookie字符串 "key1=value1; key2=value2"
+                for cookie in steam_cookies_str.split(';'):
+                    if '=' in cookie:
+                        key, value = cookie.strip().split('=', 1)
+                        steam_cookies[key] = value
+            except Exception as e:
+                print(f"解析Steam cookies失败: {e}")
+
+        # 处理Buff cookies
+        buff_cookies = {}
+        if buff_session:
+            buff_cookies['session'] = buff_session
+
+        # 测试Steam连接
+        steam_success, steam_message = test_connection(
+            "https://steamcommunity.com/market/",
+            cookies=steam_cookies,
+            proxy=proxy_url if proxy_url != "https://store.steampowered.com/" else None
+        )
+
+        # 测试Buff连接
+        buff_success, buff_message = test_connection(
+            "https://buff.163.com",
+            cookies=buff_cookies,
+            proxy=proxy_url if proxy_url != "https://store.steampowered.com/" else None
+        )
+
+        # 返回JSON响应
+        return jsonify({
+            'buff': {
+                'success': buff_success,
+                'message': buff_message
+            },
+            'steam': {
+                'success': steam_success,
+                'message': steam_message
+            }
+        })
+
+    except Exception as e:
+        print(f"API错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 # ===================== 用户管理路由 =====================

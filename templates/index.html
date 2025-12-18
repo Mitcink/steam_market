@@ -434,9 +434,55 @@
     itemsPerPageSpan.textContent = ITEMS_PER_PAGE;
 
     document.addEventListener('DOMContentLoaded', () => {
+        const savedConfig = loadConfig();
+        if (savedConfig) {
+        applyConfigToForm(savedConfig);
+        }
         loadConfig();
         checkCrawlerStatus();
         statusInterval = setInterval(checkCrawlerStatus, 5000);
+    });
+
+    // 为表单字段添加自动保存功能
+    function setupAutoSave() {
+        const fields = [
+            'buff_session',
+            'steam_cookies',
+            'proxy_url',
+            'max_threads',
+            'game_type',
+            'min_sell_price',
+            'max_sell_price',
+            'min_sell_count',
+            'web_auth'
+        ];
+
+    fields.forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            element.addEventListener('change', function() {
+                // 延迟保存，避免频繁操作
+                setTimeout(() => {
+                    const config = getFormConfig();
+                    console.log('配置已自动保存');
+                }, 500);
+            });
+        }
+    });
+}
+
+// 在DOMContentLoaded事件中调用
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedConfig = loadConfig();
+        if (savedConfig) {
+            applyConfigToForm(savedConfig);
+        }
+
+        // 设置自动保存
+        setupAutoSave();
+
+        checkCrawlerStatus();
+        fetchData();
     });
 
     document.querySelectorAll('.sidebar a').forEach(link => {
@@ -523,28 +569,58 @@
         return item[key] !== undefined && item[key] !== null ? item[key] : (key === 'name' ? '' : 0);
     }
 
-    function saveConfig() {
-        const config = getFormConfig();
-        localStorage.setItem('crawler_config', JSON.stringify(config));
-        log('配置已自动保存。', 'crawler');
+// 保存配置到localStorage
+function saveConfig(config) {
+    try {
+        localStorage.setItem('scraperConfig', JSON.stringify(config));
+        console.log('配置已保存');
+    } catch (error) {
+        console.error('保存配置失败:', error);
     }
+}
 
-    function loadConfig() {
-        const savedConfig = localStorage.getItem('crawler_config');
-        if (savedConfig) {
-            const config = JSON.parse(savedConfig);
-            document.getElementById('proxy-url').value = config.proxy_url || '';
-            document.getElementById('max-threads').value = config.max_threads || '2';
-            document.getElementById('min-sell-count').value = config.min_sell_count || '20';
-            document.getElementById('min-sell-price').value = config.min_sell_price || '25';
-            document.getElementById('max-sell-price').value = config.max_sell_price || '300';
-            document.getElementById('buff-session').value = config.buff_session || '';
-            document.getElementById('steam-cookies').value = config.steam_cookies || '';
-            document.getElementById('web-auth').checked = config.web_auth || false;
-            document.querySelector(`input[name="game-type"][value="${config.game_type}"]`).checked = true;
-            log('已加载上次保存的配置。', 'crawler');
+// 从localStorage加载配置
+function loadConfig() {
+    try {
+        const saved = localStorage.getItem('scraperConfig');
+        if (saved) {
+            const config = JSON.parse(saved);
+            console.log('已加载保存的配置');
+            return config;
         }
+    } catch (error) {
+        console.error('加载配置失败:', error);
     }
+    return null;
+}
+
+// 应用配置到表单
+function applyConfigToForm(config) {
+    if (!config) return;
+
+    // 设置表单字段值
+    const fields = [
+        'buff_session',
+        'steam_cookies',
+        'proxy_url',
+        'max_threads',
+        'game_type',
+        'min_sell_price',
+        'max_sell_price',
+        'min_sell_count'
+    ];
+
+    fields.forEach(field => {
+        const element = document.getElementById(field);
+        if (element && config[field] !== undefined) {
+            if (element.type === 'checkbox') {
+                element.checked = config[field];
+            } else {
+                element.value = config[field];
+            }
+        }
+    });
+}
 
     function log(message, type) {
         const p = document.createElement('p');
@@ -584,20 +660,26 @@
         }
     }
 
-    function getFormConfig() {
-        const gameType = document.querySelector('input[name="game-type"]:checked').value;
-        return {
-            proxy_url: document.getElementById('proxy-url').value,
-            max_threads: document.getElementById('max-threads').value,
-            game_type: gameType,
-            min_sell_count: document.getElementById('min-sell-count').value,
-            min_sell_price: document.getElementById('min-sell-price').value,
-            max_sell_price: document.getElementById('max-sell-price').value,
-            buff_session: document.getElementById('buff-session').value,
-            steam_cookies: document.getElementById('steam-cookies').value,
-            web_auth: document.getElementById('web-auth').checked
-        };
-    }
+function getFormConfig() {
+    const config = {
+        buff_session: document.getElementById('buff_session')?.value || '',
+        steam_cookies: document.getElementById('steam_cookies')?.value || '',
+        proxy_url: document.getElementById('proxy_url')?.value || '',
+        max_threads: document.getElementById('max_threads')?.value || '2',
+        game_type: document.getElementById('game_type')?.value || 'CSGO',
+        min_sell_price: document.getElementById('min_sell_price')?.value || '25',
+        max_sell_price: document.getElementById('max_sell_price')?.value || '300',
+        min_sell_count: document.getElementById('min_sell_count')?.value || '20',
+        web_auth: document.getElementById('web_auth')?.checked || false
+    };
+
+    // 保存配置
+    saveConfig(config);
+
+    return config;
+}
+
+
 
     async function toggleCrawler() {
         const status = await getCrawlerStatus();

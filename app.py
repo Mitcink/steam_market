@@ -174,8 +174,16 @@ class ScraperService:
             "page_num": page_num,
         }
         cookies = {"session": self.config["buff_session"]}
+
         try:
-            response = self.session.get("https://buff.163.com/api/market/goods", params=params, cookies=cookies)
+            # 直接使用requests.get而不是session
+            response = requests.get(
+                "https://buff.163.com/api/market/goods",
+                params=params,
+                cookies=cookies,
+                timeout=10,
+                verify=False  # 如果有SSL问题
+            )
             response.raise_for_status()
             data = response.json()
             if "data" in data and "items" in data["data"] and "total_page" in data["data"]:

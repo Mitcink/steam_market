@@ -365,6 +365,16 @@ def run_crawler(config):
     is_crawling = False
     print("爬虫已停止。")
 
+def test_connection(url, cookies=None, proxy=None):
+        try:
+            proxies = {"http": proxy, "https": proxy} if proxy else None
+            # 使用 verify=False 禁用 SSL 验证
+            response = requests.get(url, timeout=10, cookies=cookies, proxies=proxies, verify=False)
+            response.raise_for_status()
+            return True, "连接成功"
+        except requests.exceptions.RequestException as e:
+            return False, str(e)
+
 
 # ===================== 用户管理路由 =====================
 @app.route('/login', methods=['GET', 'POST'])

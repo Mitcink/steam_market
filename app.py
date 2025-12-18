@@ -155,16 +155,46 @@ def parse_cookies_string(cookie_string):
 
 
 class ScraperService:
-    # ... 原有的 ScraperService 类保持不变 ...
     def __init__(self, config):
         self.config = config
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36"
         })
-        if self.config["proxy_url"]:
-            self.session.proxies = {"http": self.config["proxy_url"], "https": self.config["proxy_url"]}
-            self.session.verify = False
+
+        # 修复代理配置逻辑
+        proxy_url = self.config.get("proxy_url")
+        if proxy_url and proxy_url.strip():
+            # 定义无效的代理URL列表
+            invalid_proxy_urls = [
+                "https://store.steampowered.com/",
+                "http://store.steampowered.com/",
+                "https://steamcommunity.com/",
+                "http://steamcommunity.com/",
+                "https://steamcommunity.com/market/",
+                "http://steamcommunity.com/market/",
+                "https://buff.163.com/",
+                "http://buff.163.com/"
+            ]
+
+            # 检查是否是有效的代理URL
+            if proxy_url not in invalid_proxy_urls:
+                # 确保代理URL格式正确
+                if not proxy_url.startswith(('http://', 'https://', 'socks5://')):
+                    proxy_url = 'http://' + proxy_url
+
+                self.session.proxies = {
+                    "http": proxy_url,
+                    "https": proxy_url
+                }
+                self.session.verify = False
+                print(f"已配置代理: {proxy_url}")
+            else:
+                print(f"检测到无效代理URL: {proxy_url}，将不使用代理")
+                self.session.proxies = {}
+        else:
+            print("未配置代理或代理URL为空")
+            self.session.proxies = {}
 
     def get_buff_items(self, page_num):
         params = {

@@ -428,6 +428,8 @@
     let allData = [];
     let currentPage = 1;
     let sortDirection = {};
+    let isLoading = false;
+    let lastDataHash = '';
 
     itemsPerPageSpan.textContent = ITEMS_PER_PAGE;
 
@@ -606,31 +608,32 @@
         }
     }
 
-    async function startCrawler() {
-        const config = getFormConfig();
-        log('正在启动爬虫...', 'crawler');
+async function startCrawler() {
+    const config = getFormConfig();
+    log('正在启动爬虫...', 'crawler');
 
-        try {
-            const response = await fetch('/api/start_crawler', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            });
-            const result = await response.json();
-            log(result.message, 'crawler');
+    try {
+        const response = await fetch('/api/start_crawler', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        const result = await response.json();
+        log(result.message, 'crawler');
 
-            if (response.ok) {
-                updateToggleButton('running');
-                if (dataInterval) {
-                    clearInterval(dataInterval);
-                }
-                fetchData();
-                dataInterval = setInterval(fetchData, 2000);
+        if (response.ok) {
+            updateToggleButton('running');
+            if (dataInterval) {
+                clearInterval(dataInterval);
             }
-        } catch (error) {
-            log(`启动爬虫失败: ${error}`, 'crawler');
+            fetchData();
+            // 降低刷新频率从2秒改为5秒
+            dataInterval = setInterval(fetchData, 5000);
         }
+    } catch (error) {
+        log(`启动爬虫失败: ${error}`, 'crawler');
     }
+}
 
     async function stopCrawler() {
         log('正在停止爬虫...', 'crawler');
@@ -669,17 +672,18 @@
         }
     }
 
-    async function checkCrawlerStatus() {
-        const status = await getCrawlerStatus();
-        updateToggleButton(status);
-        if (status === 'running' && !dataInterval) {
-            fetchData();
-            dataInterval = setInterval(fetchData, 2000);
-        } else if (status === 'stopped' && dataInterval) {
-            clearInterval(dataInterval);
-            dataInterval = null;
-        }
+async function checkCrawlerStatus() {
+    const status = await getCrawlerStatus();
+    updateToggleButton(status);
+    if (status === 'running' && !dataInterval) {
+        fetchData();
+        // 这里也改为5秒
+        dataInterval = setInterval(fetchData, 5000);
+    } else if (status === 'stopped' && dataInterval) {
+        clearInterval(dataInterval);
+        dataInterval = null;
     }
+}
 
     async function clearData() {
         if (!confirm("确定要清空所有数据吗？此操作将永久删除本地文件。")) {
@@ -702,18 +706,40 @@
         }
     }
 
-    async function fetchData() {
-        try {
-            const response = await fetch('/api/data');
-            const result = await response.json();
-            allData = result.data;
-            renderTable();
-            renderPagination();
-            updateStats();
-        } catch (error) {
-            log(`获取数据失败: ${error}`, 'crawler');
-        }
+async function fetchData() {
+    // 防止重复请求
+    if (isLoading) {
+        return;
     }
+
+    isLoading = true;
+
+    try {
+        const response = await fetch('/api/data');
+        const result = await response.json();
+
+        if (result.success && result.data) {
+            // 计算数据的简单哈希值来检测变化
+            const currentDataHash = JSON.stringify(result.data).length + '_' + result.data.length;
+
+            // 只有在数据真正变化时才更新显示
+            if (currentDataHash !== lastDataHash) {
+                allData = result.data;
+                renderTable();
+                renderPagination();
+                updateStats();
+                lastDataHash = currentDataHash;
+                console.log('数据已更新，共', result.data.length, '条记录');
+            } else {
+                console.log('数据无变化，跳过渲染');
+            }
+        }
+    } catch (error) {
+        log(`获取数据失败: ${error}`, 'crawler');
+    } finally {
+        isLoading = false;
+    }
+}
 
     function updateStats() {
         totalItemsSpan.textContent = allData.length;
@@ -723,49 +749,52 @@
         currentPageItemsSpan.textContent = pageData.length;
     }
 
-    function renderTable() {
-        dataTableBody.innerHTML = '';
+function renderTable() {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const pageData = allData.slice(startIndex, endIndex);
 
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        const endIndex = startIndex + ITEMS_PER_PAGE;
-        const pageData = allData.slice(startIndex, endIndex);
-
-        if (pageData.length === 0) {
-            const row = document.createElement('tr');
-            row.innerHTML = `<td colspan="10" style="text-align: center;">暂无数据</td>`;
-            dataTableBody.appendChild(row);
-            return;
+    // 如果当前页数据为空，显示无数据提示
+    if (pageData.length === 0) {
+        if (dataTableBody.children.length !== 1 ||
+            !dataTableBody.firstElementChild.textContent.includes('暂无数据')) {
+            dataTableBody.innerHTML = `<tr><td colspan="10" style="text-align: center;">暂无数据</td></tr>`;
         }
-
-        pageData.forEach(item => {
-            const row = document.createElement('tr');
-            const buffLink = `https://buff.163.com/goods/${item.buff_id}`;
-            const steamLink = `https://steamcommunity.com/market/listings/${item.steam_market_id}`;
-
-            // Calculate ratios in frontend for display
-            const steamSellRatio = item.buff_sell_price && item.steam_sell_price ?
-                                    (item.buff_sell_price / (item.steam_sell_price * 0.85)).toFixed(2) : 'N/A';
-            const steamBuyRatio = item.buff_buy_price && item.steam_buy_price ?
-                                   (item.buff_buy_price / (item.steam_buy_price * 1.15)).toFixed(2) : 'N/A';
-
-
-            row.innerHTML = `
-                <td>${item.name || 'N/A'}</td>
-                <td><a href="${buffLink}" target="_blank">B</a> | <a href="${steamLink}" target="_blank">S</a></td>
-                <td>${item.buff_sell_price || 'N/A'}</td>
-                <td>${item.steam_sell_price || 'N/A'}</td>
-                <td>${steamBuyRatio}</td>
-                <td>${steamSellRatio}</td>
-                <td>${item.buff_sell_num || 'N/A'}</td>
-                <td>${item.steam_sell_num || 'N/A'}</td>
-                <td>${item.steam_volume || 'N/A'}</td>
-                <td>${item.update_time || 'N/A'}</td>
-            `;
-            dataTableBody.appendChild(row);
-        });
+        return;
     }
 
-    function renderPagination() {
+    // 生成新的HTML内容
+    const newHTML = pageData.map(item => {
+        const profit = (item.steam_sell_price * 0.85 - item.buff_sell_price).toFixed(2);
+        const profitRate = item.buff_sell_price > 0 ?
+            (((item.steam_sell_price * 0.85 - item.buff_sell_price) / item.buff_sell_price) * 100).toFixed(2) : 0;
+
+        return `
+            <tr>
+                <td>${item.name || 'N/A'}</td>
+                <td>¥${item.buff_sell_price || 'N/A'}</td>
+                <td>¥${item.steam_sell_price || 'N/A'}</td>
+                <td>¥${profit}</td>
+                <td>${profitRate}%</td>
+                <td>${item.steam_volume || 'N/A'}</td>
+                <td>${item.buff_sell_num || 'N/A'}</td>
+                <td>${item.steam_sell_num || 'N/A'}</td>
+                <td>${item.update_time || 'N/A'}</td>
+                <td>
+                    <a href="https://buff.163.com/goods/${item.buff_id}" target="_blank">Buff</a> |
+                    <a href="https://steamcommunity.com/market/listings/${item.steam_market_id}" target="_blank">Steam</a>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // 只有在内容真正不同时才更新DOM
+    if (dataTableBody.innerHTML !== newHTML) {
+        dataTableBody.innerHTML = newHTML;
+    }
+}
+
+function renderPagination() {
         paginationContainer.innerHTML = '';
         const totalPages = Math.ceil(allData.length / ITEMS_PER_PAGE);
 

@@ -10,17 +10,20 @@ import random
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+from database import db
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in-production'
 
 DATA_DIR = 'data'
-DATA_FILE = os.path.join(DATA_DIR, 'crawled_data.json')
+# 移除这些旧的JSON相关变量
+# DATA_FILE = os.path.join(DATA_DIR, 'crawled_data.json')
+# crawled_data = []
+# db_lock = threading.Lock()
+
 DB_FILE = os.path.join(DATA_DIR, 'users.db')
-crawled_data = []
 is_crawling = False
 crawler_thread = None
-db_lock = threading.Lock()
 
 
 # 初始化数据库和创建默认用户
@@ -116,28 +119,50 @@ def admin_required(f):
     return decorated_function
 
 
+# 替换原来的数据加载和保存函数
 def load_data_from_file():
-    """Load crawled data from a JSON file."""
-    global crawled_data
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                crawled_data = json.load(f)
-                print(f"Loaded {len(crawled_data)} items from {DATA_FILE}")
-        except (json.JSONDecodeError, FileNotFoundError):
-            print(f"Error loading {DATA_FILE}, starting with empty data.")
-            crawled_data = []
-    else:
-        print(f"No {DATA_FILE} found, starting with empty data.")
+    """兼容性函数 - 现在从数据库加载数据"""
+    items = db.load_items()
+    print(f"从数据库加载了 {len(items)} 个物品")
+    return items
 
 
 def save_data_to_file():
-    """Save crawled data to a JSON file."""
-    with db_lock:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(crawled_data, f, ensure_ascii=False, indent=4)
+    """兼容性函数 - 现在数据自动保存到数据库"""
+    # 这个函数现在不需要做任何事情，因为数据实时保存到数据库
+    pass
+
+
+def update_crawled_data(new_items):
+    """更新爬取的数据到数据库"""
+    if new_items:
+        # 转换数据格式以匹配数据库结构
+        formatted_items = []
+        for item in new_items:
+            formatted_item = {
+                'name': item.get('name'),
+                'buff_price': item.get('buff_sell_price'),
+                'steam_price': item.get('steam_sell_price'),
+                'profit': (item.get('steam_sell_price', 0) * 0.85) - item.get('buff_sell_price', 0),
+                'profit_rate': ((item.get('steam_sell_price', 0) * 0.85) - item.get('buff_sell_price', 0)) / item.get(
+                    'buff_sell_price', 1) * 100 if item.get('buff_sell_price', 0) > 0 else 0,
+                'steam_volume': item.get('steam_volume'),
+                'buff_url': f"https://buff.163.com/goods/{item.get('buff_id')}",
+                'steam_market_url': f"https://steamcommunity.com/market/listings/{item.get('steam_market_id')}",
+                # 保留原始数据
+                'buff_id': item.get('buff_id'),
+                'steam_market_id': item.get('steam_market_id'),
+                'buff_buy_price': item.get('buff_buy_price'),
+                'steam_buy_price': item.get('steam_buy_price'),
+                'steam_sell_num': item.get('steam_sell_num'),
+                'buff_sell_num': item.get('buff_sell_num'),
+                'update_time': item.get('update_time')
+            }
+            formatted_items.append(formatted_item)
+
+        # 保存到数据库
+        db.save_items(formatted_items)
+        print(f"成功更新 {len(formatted_items)} 个物品到数据库")
 
 
 def parse_cookies_string(cookie_string):
@@ -212,7 +237,7 @@ class ScraperService:
                 params=params,
                 cookies=cookies,
                 timeout=10,
-                verify=False  # 如果有SSL问题
+                verify=False
             )
             response.raise_for_status()
             data = response.json()
@@ -234,7 +259,8 @@ class ScraperService:
         url = f"https://steamcommunity.com/market/priceoverview/?appid={appid}&market_hash_name={market_hash_name}&currency=23"
         steam_cookies_dict = parse_cookies_string(self.config["steam_cookies"])
         try:
-            response = self.session.get(url, cookies=steam_cookies_dict, timeout=10)
+            # 使用requests.get而不是self.session.get
+            response = requests.get(url, cookies=steam_cookies_dict, timeout=10, verify=False)
             response.raise_for_status()
             data = response.json()
 
@@ -256,7 +282,8 @@ class ScraperService:
             steam_cookies_dict = parse_cookies_string(self.config["steam_cookies"])
 
             try:
-                response = self.session.get(market_url, cookies=steam_cookies_dict, timeout=10)
+                # 使用requests.get而不是self.session.get
+                response = requests.get(market_url, cookies=steam_cookies_dict, timeout=10, verify=False)
                 response.raise_for_status()
             except requests.exceptions.HTTPError as e:
                 print(
@@ -267,7 +294,7 @@ class ScraperService:
                 return None
 
             market_html = response.text
-            match = re.search(r"Market_LoadOrderSpread\(\s(\d+)\s\);", market_html)
+            match = re.search(r"Market_LoadOrderSpread$\s(\d+)\s$;", market_html)
             if not match:
                 print(f"Market ID not found for {item['name']}. Skipping.")
                 return None
@@ -276,7 +303,8 @@ class ScraperService:
             api_url = f"https://steamcommunity.com/market/itemordershistogram?country=CN&language=schinese&currency=23&item_nameid={market_id}"
 
             try:
-                api_response = self.session.get(api_url, cookies=steam_cookies_dict, timeout=10)
+                # 使用requests.get而不是self.session.get
+                api_response = requests.get(api_url, cookies=steam_cookies_dict, timeout=10, verify=False)
                 api_response.raise_for_status()
                 api_data = api_response.json()
             except requests.exceptions.HTTPError as e:
@@ -337,7 +365,7 @@ class ScraperService:
 
 
 def run_crawler(config):
-    global is_crawling, crawled_data
+    global is_crawling
     is_crawling = True
 
     print(f"Starting crawler with config: {config}")
@@ -345,6 +373,7 @@ def run_crawler(config):
     scraper = ScraperService(config)
     page_num = 1
     total_pages = 10
+    new_items = []  # 收集新物品
 
     while is_crawling:
         try:
@@ -368,24 +397,23 @@ def run_crawler(config):
                     if processed_item and processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
                         sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)
                         if sell_ratio < 0.88:
-                            with db_lock:
-                                found = False
-                                for i, existing_item in enumerate(crawled_data):
-                                    if existing_item['buff_id'] == processed_item['buff_id']:
-                                        crawled_data[i] = processed_item
-                                        found = True
-                                        break
-                                if not found:
-                                    crawled_data.append(processed_item)
-                                    if len(crawled_data) > 1000:
-                                        crawled_data.pop(0)
+                            new_items.append(processed_item)
 
-                            save_data_to_file()
+                            # 每收集10个物品就批量保存一次
+                            if len(new_items) >= 10:
+                                update_crawled_data(new_items)
+                                new_items = []
 
                 sleep_time = random.uniform(2, 5)
-                if len(crawled_data) > 200:
+                current_count = db.get_count()
+                if current_count > 200:
                     sleep_time = random.uniform(5, 10)
                 time.sleep(sleep_time)
+
+            # 保存剩余的物品
+            if new_items:
+                update_crawled_data(new_items)
+                new_items = []
 
             page_num += 1
             if page_num > total_pages:
@@ -403,15 +431,16 @@ def run_crawler(config):
     is_crawling = False
     print("爬虫已停止。")
 
+
 def test_connection(url, cookies=None, proxy=None):
-        try:
-            proxies = {"http": proxy, "https": proxy} if proxy else None
-            # 使用 verify=False 禁用 SSL 验证
-            response = requests.get(url, timeout=10, cookies=cookies, proxies=proxies, verify=False)
-            response.raise_for_status()
-            return True, "连接成功"
-        except requests.exceptions.RequestException as e:
-            return False, str(e)
+    try:
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        # 使用 verify=False 禁用 SSL 验证
+        response = requests.get(url, timeout=10, cookies=cookies, proxies=proxies, verify=False)
+        response.raise_for_status()
+        return True, "连接成功"
+    except requests.exceptions.RequestException as e:
+        return False, str(e)
 
 
 # 新的API路由处理函数
@@ -423,7 +452,7 @@ def api_test_connection():
         print(f"收到配置: {config}")
 
         # 从配置中提取需要的参数
-        proxy_url = config.get('proxy_url')  # 注意：这里是proxy_url不是proxy
+        proxy_url = config.get('proxy_url')
         steam_cookies_str = config.get('steam_cookies')
         buff_session = config.get('buff_session')
 
@@ -714,37 +743,47 @@ def get_status():
     return jsonify({"status": "running" if is_crawling else "stopped"})
 
 
+# 修改数据API，从数据库获取数据
 @app.route('/api/data')
 @login_required
 def get_data():
-    global crawled_data
-    with db_lock:
-        return jsonify({"data": crawled_data})
+    try:
+        # 直接从数据库获取最新数据
+        items = db.load_items()
+        return jsonify({
+            "success": True,
+            "data": items,
+            "count": len(items)
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
+# 修改清空数据API
 @app.route('/api/clear_data', methods=['POST'])
 @admin_required
 def clear_data():
-    global crawled_data
-    with db_lock:
-        try:
-            if os.path.exists(DATA_FILE):
-                os.remove(DATA_FILE)
-                print(f"Successfully removed {DATA_FILE}")
-            crawled_data = []
-            return jsonify({"message": "数据已成功清空。"}), 200
-        except OSError as e:
-            print(f"Error removing file {DATA_FILE}: {e}")
-            return jsonify({"message": f"清空数据失败: {e}"}), 500
+    try:
+        # 清空数据库中的物品数据
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM items')
+        conn.commit()
+        conn.close()
+
+        print("数据库中的物品数据已清空")
+        return jsonify({"message": "数据已成功清空。"}), 200
+    except Exception as e:
+        print(f"清空数据失败: {e}")
+        return jsonify({"message": f"清空数据失败: {e}"}), 500
 
 
 if __name__ == '__main__':
     # 初始化数据库
     init_db()
-
-    # 加载爬虫数据
-    os.makedirs('data', exist_ok=True)
-    load_data_from_file()
 
     # 设置安全的密钥（生产环境请使用环境变量）
     app.secret_key = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-me'

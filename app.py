@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
-from typing import Optional, Dict, Any
 import threading
 import time
 import requests
@@ -11,8 +10,14 @@ import sqlite3
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
-from database import db
-# 忽略 SSL 警告
+
+# 导入 database.py 中的 db 实例
+try:
+    from database import db
+except ImportError:
+    db = None
+
+# 忽略 SSL 警告 (保留关闭验证的逻辑)
 from urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
@@ -23,17 +28,22 @@ app.secret_key = os.environ.get('SECRET_KEY') or 'dev-secret-key-9527'
 DATA_DIR = 'data'
 USER_DB = os.path.join(DATA_DIR, 'users.db')
 
-# 爬虫全局状态
-crawler_state: Dict[str, Any] = {
-    "is_crawling": False,
-    "thread": None,
-}
+
+# 全局状态管理
+class CrawlerState:
+    def __init__(self):
+        self.is_crawling = False
+        self.thread = None
 
 
-# ===================== 用户权限管理 =====================
+state = CrawlerState()
+
+
+# ===================== 权限校验与初始化 =====================
 
 def init_user_db():
-    os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
     conn = sqlite3.connect(USER_DB)
     conn.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +51,6 @@ def init_user_db():
         password_hash TEXT NOT NULL,
         is_admin BOOLEAN DEFAULT 0
     )''')
-    # 默认账号: admin / admin123
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE username='admin'")
     if not cursor.fetchone():
@@ -55,12 +64,69 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            # 关键：如果是接口请求，返回 JSON 而不是跳转页面
             if request.path.startswith('/api/'):
-                return jsonify({"status": "error", "message": "Unauthorized: 登录已失效"}), 401
+                return jsonify({"status": "error", "message": "登录过期"}), 401
             return redirect(url_for('login'))
         return f(*args, **kwargs)
+
     return decorated_function
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('is_admin'):
+            return "权限不足", 403
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+# ===================== 核心页面路由 =====================
+
+@app.route('/')
+@login_required
+def index():
+    return render_template('index.html', user=session.get('username'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        conn = sqlite3.connect(USER_DB)
+        conn.row_factory = sqlite3.Row
+        user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        conn.close()
+        if user and check_password_hash(user['password_hash'], password):
+            session.update({"user_id": user['id'], "username": user['username'], "is_admin": user['is_admin']})
+            return redirect(url_for('index'))
+        return "用户名或密码错误", 401
+    return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+
+@app.route('/profile')
+@login_required
+def profile():
+    return render_template('profile.html', user=session.get('username'))
+
+
+@app.route('/admin/users')
+@login_required
+@admin_required
+def admin_users():
+    conn = sqlite3.connect(USER_DB)
+    conn.row_factory = sqlite3.Row
+    users = conn.execute("SELECT id, username, is_admin FROM users").fetchall()
+    conn.close()
+    return render_template('admin_users.html', users=users)
 
 
 # ===================== 爬虫逻辑封装 =====================
@@ -69,29 +135,26 @@ class ScraperService:
     def __init__(self, config):
         self.config = config
         self.session = requests.Session()
-        self.session.verify = False  # 保留关闭 SSL 验证
-        self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        self.session.verify = False
+        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-        # 处理代理
+        # 代理处理
         proxy = self.config.get("proxy_url")
         if proxy and proxy.strip():
             if not proxy.startswith(('http', 'socks')): proxy = 'http://' + proxy
             self.session.proxies = {"http": proxy, "https": proxy}
 
     def fetch_steam_price(self, hash_name):
-        """适配前端 game_type 的 Steam 价格获取"""
-        # CSGO AppID: 730, Dota2 AppID: 570
         appid = "730" if self.config.get("game_type") == "CSGO" else "570"
         url = f"https://steamcommunity.com/market/priceoverview/?appid={appid}&currency=23&market_hash_name={hash_name}"
 
-        # 解析 Cookie 字符串
         cookies = {}
         c_str = self.config.get("steam_cookies", "")
         for pair in re.finditer(r'([^=;]+)=([^;]*)', c_str):
             cookies[pair.group(1).strip()] = pair.group(2).strip()
 
         try:
-            resp = self.session.get(url, cookies=cookies, timeout=10)
+            resp = self.session.get(url, cookies=cookies, headers=self.headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("success"):
@@ -104,12 +167,10 @@ class ScraperService:
 
 
 def crawler_worker(config):
-    """主爬虫线程"""
     scraper = ScraperService(config)
     page = 1
-
     try:
-        while crawler_state["is_crawling"]:
+        while state.is_crawling:
             buff_params = {
                 "game": config.get("game_type", "csgo").lower(),
                 "page_num": page,
@@ -131,9 +192,8 @@ def crawler_worker(config):
 
             batch = []
             for item in items:
-                if not crawler_state["is_crawling"]: break
+                if not state.is_crawling: break
 
-                # 过滤：在售数量
                 if item["sell_num"] >= int(config.get("min_sell_count", 0)):
                     s_price, s_vol = scraper.fetch_steam_price(item["market_hash_name"])
 
@@ -141,7 +201,6 @@ def crawler_worker(config):
                         b_price = float(item["sell_min_price"])
                         profit = (s_price * 0.85) - b_price
 
-                        # 构造存入数据库的格式 (适配 database.py 的 save_items)
                         batch.append({
                             "name": item["name"],
                             "buff_price": b_price,
@@ -152,99 +211,67 @@ def crawler_worker(config):
                             "buff_url": f"https://buff.163.com/goods/{item['id']}",
                             "steam_market_url": f"https://steamcommunity.com/market/listings/730/{item['market_hash_name']}"
                         })
-                # 随机延迟，对应前端的“多线程”模拟（实际上 Steam 必须单线程，否则必封）
-                time.sleep(random.uniform(2, 5))
+                time.sleep(random.uniform(2, 4))
 
-            if batch:
+            if batch and db:
                 db.save_items(batch)
 
             page = page + 1 if page < total_page else 1
             time.sleep(5)
     finally:
-        crawler_state["is_crawling"] = False
+        state.is_crawling = False
 
 
-# ===================== 路由接口 =====================
-
-@app.route('/')
-@login_required
-def index():
-    return render_template('index.html', user=session.get('username'))
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username, password = request.form.get('username'), request.form.get('password')
-        conn = sqlite3.connect(USER_DB)
-        conn.row_factory = sqlite3.Row
-        user = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-        conn.close()
-        if user and check_password_hash(user['password_hash'], password):
-            session.update({"user_id": user['id'], "username": user['username'], "is_admin": user['is_admin']})
-            return redirect(url_for('index'))
-        return "登录失败", 401
-    return render_template('login.html')
+# ===================== API 接口 =====================
 
 @app.route('/api/status')
 @login_required
 def get_status():
-    """补全被删除的状态接口，供前端轮询查询"""
     return jsonify({
-        "status": "running" if crawler_state["is_crawling"] else "stopped",
-        "is_crawling": crawler_state["is_crawling"]
+        "status": "running" if state.is_crawling else "stopped",
+        "is_crawling": state.is_crawling
     })
 
 
 @app.route('/api/start_crawler', methods=['POST'])
 @login_required
 def start_crawler():
-    if crawler_state["is_crawling"]:
-        return jsonify({"status": "error", "message": "爬虫已在运行中"}), 400
-
-    # 接收前端配置
+    if state.is_crawling: return jsonify({"status": "running"})
     config = request.json
-    if not config:
-        return jsonify({"status": "error", "message": "无效的配置参数"}), 400
-
-    crawler_state["is_crawling"] = True
-    # 启动异步线程
-    crawler_state["thread"] = threading.Thread(
-        target=crawler_worker,
-        args=(config,),
-        daemon=True
-    )
-    crawler_state["thread"].start()
-
-    return jsonify({"status": "success", "message": "爬虫指令发送成功"})
+    state.is_crawling = True
+    state.thread = threading.Thread(target=crawler_worker, args=(config,), daemon=True)
+    state.thread.start()
+    return jsonify({"status": "success", "message": "爬虫已启动"})
 
 
 @app.route('/api/stop_crawler', methods=['POST'])
 @login_required
-def stop():
-    crawler_state["is_crawling"] = False
-    return jsonify({"message": "Stopped"})
+def stop_crawler():
+    state.is_crawling = False
+    return jsonify({"status": "success"})
 
-@app.route('/api/clear_data', methods=['POST'])
-@login_required
-def clear_data():
-    if not session.get('is_admin'):
-        return jsonify({"error": "需要管理员权限"}), 403
-    try:
-        # 使用 database.py 实例清空数据（假设你在 ItemDatabase 里实现了清空）
-        # 如果没有实现，可以手动操作：
-        conn = sqlite3.connect(db.db_path)
-        conn.execute("DELETE FROM items")
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "数据已成功清空"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/data')
 @login_required
 def get_data():
-    return jsonify({"data": db.load_items()})
+    if db:
+        items = db.load_items()
+        return jsonify({"success": True, "data": items})
+    return jsonify({"success": False, "data": []})
+
+
+@app.route('/api/clear_data', methods=['POST'])
+@login_required
+@admin_required
+def clear_data():
+    try:
+        conn = sqlite3.connect(db.db_path)
+        conn.execute("DELETE FROM items")
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "数据已清空"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':

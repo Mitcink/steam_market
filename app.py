@@ -136,13 +136,18 @@ class ScraperService:
         self.config = config
         self.session = requests.Session()
         self.session.verify = False
-        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://buff.163.com/market/goods?game=csgo",  # 必须加这个
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest"
+        }
 
-        # 代理处理
-        proxy = self.config.get("proxy_url")
-        if proxy and proxy.strip():
-            if not proxy.startswith(('http', 'socks')): proxy = 'http://' + proxy
-            self.session.proxies = {"http": proxy, "https": proxy}
+        # # 代理处理
+        # proxy = self.config.get("proxy_url")
+        # if proxy and proxy.strip():
+        #     if not proxy.startswith(('http', 'socks')): proxy = 'http://' + proxy
+        #     self.session.proxies = {"http": proxy, "https": proxy}
 
     def fetch_steam_price(self, hash_name):
         appid = "730" if self.config.get("game_type") == "CSGO" else "570"
@@ -183,8 +188,17 @@ def crawler_worker(config):
                 "use_sort": "1",
                 "trigger": "search"  # 补充缺失的参数
             }
-            buff_cookies = {"session": config.get("buff_session")}
-
+            raw_cookie = config.get("buff_session", "")
+            buff_cookies = {}
+            if ";" in raw_cookie:
+                # 如果用户粘贴了完整的 Cookie 字符串，自动解析
+                for item in raw_cookie.split(';'):
+                    if '=' in item:
+                        k, v = item.strip().split('=', 1)
+                        buff_cookies[k] = v
+            else:
+                # 兼容只填入 sessionid 的情况
+                buff_cookies = {"session": raw_cookie}
             try:
                 print(f"[{datetime.now()}] 正在请求 Buff API 第 {page} 页...", flush=True)
                 resp = scraper.session.get("https://buff.163.com/api/market/goods",

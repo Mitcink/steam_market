@@ -8,10 +8,13 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - TZ=Asia/Shanghai
+      - SECRET_KEY=prod-secret-key-change-this  # 记得改这个
       - FLASK_ENV=production
-      - PYTHONUNBUFFERED=1  # 关键：强制 Python 实时刷新日志，不再缓冲
     volumes:
+      # 映射本地 data 目录到容器内
+      # 注意：确保宿主机上的 ./data 目录对 UID 1000 可写
       - ./data:/app/data
-    # 覆盖启动命令：1个进程，10个并发线程
-    command: gunicorn --workers 1 --threads 10 --bind 0.0.0.0:5000 --access-logfile - --error-logfile - app:app
+
+    # 如果在 Linux 上运行遇到 Permission Denied 错误，
+    # 取消下面这一行的注释，强制使用当前用户的 UID:GID
+    # user: "${UID}:${GID}"

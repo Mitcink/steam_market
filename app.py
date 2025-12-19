@@ -169,38 +169,67 @@ class ScraperService:
 def crawler_worker(config):
     scraper = ScraperService(config)
     page = 1
-    print(f"[{datetime.now()}] 爬虫线程真正开始运行了...", flush=True)
+    print(
+        f"[{datetime.now()}] >>> 爬虫线程启动配置: Game={config.get('game_type')}, MinPrice={config.get('min_sell_price')}",
+        flush=True)
+
     try:
         while state.is_crawling:
-            print(f"[{datetime.now()}] 正在处理第 {page} 页数据...", flush=True)
             buff_params = {
                 "game": config.get("game_type", "csgo").lower(),
                 "page_num": page,
                 "min_price": config.get("min_sell_price"),
                 "max_price": config.get("max_sell_price"),
-                "use_sort": "1"
+                "use_sort": "1",
+                "trigger": "search"  # 补充缺失的参数
             }
             buff_cookies = {"session": config.get("buff_session")}
 
             try:
+                print(f"[{datetime.now()}] 正在请求 Buff API 第 {page} 页...", flush=True)
                 resp = scraper.session.get("https://buff.163.com/api/market/goods",
-                                           params=buff_params, cookies=buff_cookies, timeout=10)
+                                           params=buff_params, cookies=buff_cookies, timeout=15)
+
+                if resp.status_code != 200:
+                    print(f"[{datetime.now()}] Buff 接口返回状态码异常: {resp.status_code}", flush=True)
+                    time.sleep(10)
+                    page += 1  # 失败也尝试下一页，避免死循环
+                    continue
+
                 res_data = resp.json()
+                if res_data.get("code") != "OK":
+                    print(f"[{datetime.now()}] Buff 业务报错: {res_data.get('error', '未知错误')}", flush=True)
+                    # 如果是登录失效，直接停止爬虫
+                    if "Login" in res_data.get('error', ''):
+                        state.is_crawling = False
+                        break
+                    time.sleep(10)
+                    page += 1
+                    continue
+
                 items = res_data.get("data", {}).get("items", [])
                 total_page = res_data.get("data", {}).get("total_page", 1)
-            except:
+                print(f"[{datetime.now()}] 第 {page} 页获取成功，包含 {len(items)} 个物品", flush=True)
+
+            except Exception as e:
+                print(f"[{datetime.now()}] 请求过程发生网络异常: {str(e)}", flush=True)
                 time.sleep(10)
+                page += 1
                 continue
 
             batch = []
             for item in items:
                 if not state.is_crawling: break
 
-                if item["sell_num"] >= int(config.get("min_sell_count", 0)):
+                # 筛选逻辑：上架数量必须大于设定值
+                min_count = int(config.get("min_sell_count") or 0)
+                if item.get("sell_num", 0) >= min_count:
+                    print(f"   - 正在查询 Steam 价格: {item['name']}", flush=True)
                     s_price, s_vol = scraper.fetch_steam_price(item["market_hash_name"])
 
-                    if s_price and s_vol > 10:
+                    if s_price and s_vol > 0:
                         b_price = float(item["sell_min_price"])
+                        # 利润 = Steam到手价(15%手续费) - Buff买入价
                         profit = (s_price * 0.85) - b_price
 
                         batch.append({
@@ -213,29 +242,22 @@ def crawler_worker(config):
                             "buff_url": f"https://buff.163.com/goods/{item['id']}",
                             "steam_market_url": f"https://steamcommunity.com/market/listings/730/{item['market_hash_name']}"
                         })
-                        if not batch:
-                            print(f"[{datetime.now()}] 第 {page} 页未发现符合条件的物品", flush=True)
-                        else:
-                            print(f"[{datetime.now()}] 成功抓取 {len(batch)} 个物品并写入数据库", flush=True)
-                time.sleep(random.uniform(2, 4))
+                    # 避免频繁请求 Steam 被封 IP
+                    time.sleep(random.uniform(3, 6))
 
             if batch and db:
                 db.save_items(batch)
+                print(f"[{datetime.now()}] 已保存 {len(batch)} 个套利项到数据库", flush=True)
 
-                # 模拟抓取后的反馈
-                print(f"[{datetime.now()}] 第 {page} 页处理完成，休息中...", flush=True)
+            page = page + 1 if page < total_page else 1
+            print(f"[{datetime.now()}] 准备进入下一页，休息中...", flush=True)
+            time.sleep(5)
 
-                page += 1
-                time.sleep(random.uniform(5, 10))
-
-                # 如果到达末尾，回到第一页
-                if page > 100: page = 1
     except Exception as e:
-        print(f"[{datetime.now()}] 爬虫线程异常中断: {e}", flush=True)
+        print(f"[{datetime.now()}] 线程崩溃: {str(e)}", flush=True)
     finally:
         state.is_crawling = False
         print(f"[{datetime.now()}] <<< 爬虫线程已安全退出", flush=True)
-
 
 # ===================== API 接口 =====================
 

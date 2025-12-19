@@ -10,5 +10,8 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1  # 关键：强制 Python 实时刷新日志，不再缓冲
     volumes:
-      - ./data:/app/data  # 数据持久化
+      - ./data:/app/data
+    # 覆盖启动命令：1个进程，10个并发线程
+    command: gunicorn --workers 1 --threads 10 --bind 0.0.0.0:5000 --access-logfile - --error-logfile - app:app

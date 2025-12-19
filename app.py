@@ -169,8 +169,10 @@ class ScraperService:
 def crawler_worker(config):
     scraper = ScraperService(config)
     page = 1
+    print(f"[{datetime.now()}] 爬虫线程真正开始运行了...", flush=True)
     try:
         while state.is_crawling:
+            print(f"[{datetime.now()}] 正在处理第 {page} 页数据...", flush=True)
             buff_params = {
                 "game": config.get("game_type", "csgo").lower(),
                 "page_num": page,
@@ -211,15 +213,28 @@ def crawler_worker(config):
                             "buff_url": f"https://buff.163.com/goods/{item['id']}",
                             "steam_market_url": f"https://steamcommunity.com/market/listings/730/{item['market_hash_name']}"
                         })
+                        if not batch:
+                            print(f"[{datetime.now()}] 第 {page} 页未发现符合条件的物品", flush=True)
+                        else:
+                            print(f"[{datetime.now()}] 成功抓取 {len(batch)} 个物品并写入数据库", flush=True)
                 time.sleep(random.uniform(2, 4))
 
             if batch and db:
                 db.save_items(batch)
 
-            page = page + 1 if page < total_page else 1
-            time.sleep(5)
+                # 模拟抓取后的反馈
+                print(f"[{datetime.now()}] 第 {page} 页处理完成，休息中...", flush=True)
+
+                page += 1
+                time.sleep(random.uniform(5, 10))
+
+                # 如果到达末尾，回到第一页
+                if page > 100: page = 1
+    except Exception as e:
+        print(f"[{datetime.now()}] 爬虫线程异常中断: {e}", flush=True)
     finally:
         state.is_crawling = False
+        print(f"[{datetime.now()}] <<< 爬虫线程已安全退出", flush=True)
 
 
 # ===================== API 接口 =====================

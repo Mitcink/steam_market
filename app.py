@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
+from typing import Optional, Dict, Any
 import threading
 import time
 import requests
@@ -23,7 +24,7 @@ DATA_DIR = 'data'
 USER_DB = os.path.join(DATA_DIR, 'users.db')
 
 # 爬虫全局状态
-crawler_state = {
+crawler_state: Dict[str, Any] = {
     "is_crawling": False,
     "thread": None,
 }
@@ -54,9 +55,11 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
+            # 关键：如果是接口请求，返回 JSON 而不是跳转页面
+            if request.path.startswith('/api/'):
+                return jsonify({"status": "error", "message": "Unauthorized: 登录已失效"}), 401
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-
     return decorated_function
 
 
@@ -183,14 +186,37 @@ def login():
         return "登录失败", 401
     return render_template('login.html')
 
+@app.route('/api/status')
+@login_required
+def get_status():
+    """补全被删除的状态接口，供前端轮询查询"""
+    return jsonify({
+        "status": "running" if crawler_state["is_crawling"] else "stopped",
+        "is_crawling": crawler_state["is_crawling"]
+    })
+
 
 @app.route('/api/start_crawler', methods=['POST'])
 @login_required
-def start():
-    if crawler_state["is_crawling"]: return jsonify({"status": "running"})
+def start_crawler():
+    if crawler_state["is_crawling"]:
+        return jsonify({"status": "error", "message": "爬虫已在运行中"}), 400
+
+    # 接收前端配置
+    config = request.json
+    if not config:
+        return jsonify({"status": "error", "message": "无效的配置参数"}), 400
+
     crawler_state["is_crawling"] = True
-    threading.Thread(target=crawler_worker, args=(request.json,), daemon=True).start()
-    return jsonify({"message": "Started"})
+    # 启动异步线程
+    crawler_state["thread"] = threading.Thread(
+        target=crawler_worker,
+        args=(config,),
+        daemon=True
+    )
+    crawler_state["thread"].start()
+
+    return jsonify({"status": "success", "message": "爬虫指令发送成功"})
 
 
 @app.route('/api/stop_crawler', methods=['POST'])
@@ -199,6 +225,21 @@ def stop():
     crawler_state["is_crawling"] = False
     return jsonify({"message": "Stopped"})
 
+@app.route('/api/clear_data', methods=['POST'])
+@login_required
+def clear_data():
+    if not session.get('is_admin'):
+        return jsonify({"error": "需要管理员权限"}), 403
+    try:
+        # 使用 database.py 实例清空数据（假设你在 ItemDatabase 里实现了清空）
+        # 如果没有实现，可以手动操作：
+        conn = sqlite3.connect(db.db_path)
+        conn.execute("DELETE FROM items")
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "数据已成功清空"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/data')
 @login_required

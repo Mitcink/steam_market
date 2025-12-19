@@ -695,7 +695,7 @@ async function startCrawler() {
     log('正在启动爬虫...', 'crawler');
 
     try {
-        const response = await fetch('/api/start_crawler', {
+            const response = await fetch('/api/start_crawler', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)

@@ -135,13 +135,35 @@ class ScraperService:
     def __init__(self, config):
         self.config = config
         self.session = requests.Session()
-        self.session.verify = False
-        self.headers = {
+        # 统一设置 Session 的 Headers，确保每次请求都带着
+        self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://buff.163.com/market/goods?game=csgo",  # 必须加这个
             "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest"
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": "https://buff.163.com/market/goods?game=csgo"
+        })
+
+    def fetch_buff_data(self, page):
+        url = "https://buff.163.com/api/market/goods"
+        params = {
+            "game": self.config.get("game_type", "csgo").lower(),
+            "page_num": page,
+            "page_size": 80,
+            "min_price": self.config.get("min_sell_price"),
+            "max_price": self.config.get("max_sell_price"),
+            "use_sort": "1",
+            "trigger": "search"
         }
+
+        # 构造 Cookie 字典
+        raw_session = self.config.get("buff_session", "").strip()
+        # 如果你填的是一长串，只取 session 部分，或者整个塞进去
+        cookies = {"session": raw_session}
+
+        # 打印一下，检查发送时 session 是否为空 (调试用)
+        # print(f"DEBUG: Sending session: {raw_session[:10]}...", flush=True)
+
+        return self.session.get(url, params=params, cookies=cookies, timeout=10)
 
         # # 代理处理
         # proxy = self.config.get("proxy_url")

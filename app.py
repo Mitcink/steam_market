@@ -137,14 +137,17 @@ class ScraperService:
         self.session = requests.Session()
         # 统一设置 Session 的 Headers，确保每次请求都带着
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": "https://buff.163.com/market/goods?game=csgo"
+            "Referer": "https://buff.163.com/market/goods?game=csgo",
+            "Connection": "keep-alive"  # 保持长连接
         })
 
     def fetch_buff_data(self, page):
         url = "https://buff.163.com/api/market/goods"
+        time.sleep(random.uniform(2.0, 5.0))
         params = {
             "game": self.config.get("game_type", "csgo").lower(),
             "page_num": page,

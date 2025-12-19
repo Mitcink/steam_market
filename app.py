@@ -117,12 +117,9 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            # 关键修改：如果是 API 请求，返回 401 JSON，而不是重定向
-            if request.path.startswith('/api/') or request.is_json:
-                return jsonify({"error": "Unauthorized", "message": "登录已过期，请重新登录"}), 401
-            # 普通页面请求才重定向
             return redirect(url_for('login'))
         return f(*args, **kwargs)
+
     return decorated_function
 
 
@@ -130,8 +127,6 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            if request.path.startswith('/api/') or request.is_json:
-                return jsonify({"error": "Unauthorized", "message": "请先登录"}), 401
             return redirect(url_for('login'))
 
         # 优先使用 session 中的缓存状态，减少数据库查询
@@ -146,13 +141,9 @@ def admin_required(f):
 
         if not user or not user[0]:
             return jsonify({"error": "需要管理员权限"}), 403
-        # 如果不是管理员
-        if request.path.startswith('/api/') or request.is_json:
-            return jsonify({"error": "Forbidden", "message": "需要管理员权限"}), 403
 
         session['is_admin'] = True  # 更新缓存
         return f(*args, **kwargs)
-
 
     return decorated_function
 
@@ -765,11 +756,14 @@ def get_data():
 @admin_required
 def clear_data():
     try:
-        db.clear_all() # 调用 database.py 里的新方法
-        print("数据库中的物品数据已清空")
+        # 使用 database.py 对应的数据库路径
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM items')
+        conn.commit()
+        conn.close()
         return jsonify({"message": "数据已成功清空。"}), 200
     except Exception as e:
-        print(f"清空数据失败: {e}")
         return jsonify({"message": f"清空数据失败: {e}"}), 500
 
 

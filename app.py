@@ -5,7 +5,7 @@ import time
 import requests
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import random
 import sqlite3
@@ -37,6 +37,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in-production'
+
+# Session 配置
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # session 有效期 24 小时
+app.config['SESSION_COOKIE_SECURE'] = False  # HTTP 环境设为 False，HTTPS 环境设为 True
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # 防止 XSS 攻击
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # 防止 CSRF 攻击，Lax 允许部分跨站请求
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True  # 每次请求都刷新 session 过期时间
+
 CORS(app, supports_credentials=True)
 
 DATA_DIR = 'data'
@@ -546,6 +554,7 @@ def login():
             user = cursor.fetchone()
 
         if user and user[2] == 1 and check_password_hash(user[1], password):
+            session.permanent = True  # 启用永久 session，使用配置的超时时间
             session['user_id'] = user[0]
             session['username'] = username
             session['is_admin'] = bool(user[3])

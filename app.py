@@ -14,7 +14,6 @@ from contextlib import contextmanager
 import urllib3
 
 # 假设 database.py 存在并处理 items 表
-# 如果 database.py 不存在，你需要自己实现 db 对象的方法
 try:
     from database import db
 except ImportError:

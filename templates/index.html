@@ -433,6 +433,26 @@
 
     itemsPerPageSpan.textContent = ITEMS_PER_PAGE;
 
+    // 通用函数：检查响应是否有效，处理 session 过期
+    async function checkResponse(response) {
+        // 检查是否被重定向到登录页面
+        if (response.redirected || response.url.includes('/login')) {
+            alert('会话已过期，请重新登录');
+            window.location.href = '/login';
+            return null;
+        }
+
+        // 检查响应类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            alert('会话已过期，请重新登录');
+            window.location.href = '/login';
+            return null;
+        }
+
+        return response;
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         const savedConfig = loadConfig();
         if (savedConfig) {
@@ -695,11 +715,19 @@ async function startCrawler() {
     log('正在启动爬虫...', 'crawler');
 
     try {
-            const response = await fetch('/api/start_crawler', {
+        const response = await fetch('/api/start_crawler', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
+
+        // 使用通用检查函数
+        const validResponse = await checkResponse(response);
+        if (!validResponse) {
+            log('会话已过期，请重新登录', 'crawler');
+            return;
+        }
+
         const result = await response.json();
         log(result.message, 'crawler');
 
@@ -721,6 +749,13 @@ async function startCrawler() {
         log('正在停止爬虫...', 'crawler');
         try {
             const response = await fetch('/api/stop_crawler', { method: 'POST' });
+            
+            const validResponse = await checkResponse(response);
+            if (!validResponse) {
+                log('会话已过期，请重新登录', 'crawler');
+                return;
+            }
+            
             const result = await response.json();
             log(result.message, 'crawler');
 
@@ -736,6 +771,12 @@ async function startCrawler() {
     async function getCrawlerStatus() {
         try {
             const response = await fetch('/api/status');
+            
+            const validResponse = await checkResponse(response);
+            if (!validResponse) {
+                return 'stopped';
+            }
+            
             const result = await response.json();
             return result.status;
         } catch (error) {
@@ -774,6 +815,13 @@ async function checkCrawlerStatus() {
         log("正在清空数据...", 'crawler');
         try {
             const response = await fetch('/api/clear_data', { method: 'POST' });
+            
+            const validResponse = await checkResponse(response);
+            if (!validResponse) {
+                log('会话已过期，请重新登录', 'crawler');
+                return;
+            }
+            
             const result = await response.json();
             log(result.message, 'crawler');
             if (response.ok) {
@@ -798,6 +846,13 @@ async function fetchData() {
 
     try {
         const response = await fetch('/api/data');
+        
+        const validResponse = await checkResponse(response);
+        if (!validResponse) {
+            isLoading = false;
+            return;
+        }
+        
         const result = await response.json();
 
         if (result.success && result.data) {

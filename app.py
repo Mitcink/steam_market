@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask_cors import CORS
 import threading
 import time
 import requests
@@ -36,6 +37,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in-production'
+CORS(app, supports_credentials=True)
 
 DATA_DIR = 'data'
 DB_FILE = os.path.join(DATA_DIR, 'users.db')

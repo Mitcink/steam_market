@@ -473,17 +473,13 @@ def run_crawler(config):
                 if page_num > 1:
                     page_num = 1
                 continue
-
             for item in items:
                 if not is_crawling:
                     break
 
                 if item["sell_num"] >= int(config["min_sell_count"]):
-                    # 构造临时对象传递给 get_steam_data 提取 URL
-                    # 注意：Buff API 返回的 goods_info 包含 steam_market_url
-                    temp_item = item.copy()
-                    temp_item['steam_market_url'] = item.get(
-                        'steam_market_url') or f"https://steamcommunity.com/market/listings/{item.get('appid')}/{item.get('market_hash_name')}"
+                    # 调用 get_steam_data 获取 Steam 市场数据
+                    processed_item = scraper.get_steam_data(item)
 
                     if processed_item and processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
                         sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)

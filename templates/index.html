@@ -428,13 +428,81 @@
     let allData = [];
     let currentPage = 1;
     let sortDirection = {};
+    let isLoading = false;
+    let lastDataHash = '';
 
     itemsPerPageSpan.textContent = ITEMS_PER_PAGE;
 
+    // 通用函数：检查响应是否有效，处理 session 过期
+    async function checkResponse(response) {
+        // 检查是否被重定向到登录页面
+        if (response.redirected || response.url.includes('/login')) {
+            alert('会话已过期，请重新登录');
+            window.location.href = '/login';
+            return null;
+        }
+
+        // 检查响应类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            alert('会话已过期，请重新登录');
+            window.location.href = '/login';
+            return null;
+        }
+
+        return response;
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
+        const savedConfig = loadConfig();
+        if (savedConfig) {
+        applyConfigToForm(savedConfig);
+        }
         loadConfig();
         checkCrawlerStatus();
         statusInterval = setInterval(checkCrawlerStatus, 5000);
+    });
+
+    // 为表单字段添加自动保存功能
+    function setupAutoSave() {
+        const fields = [
+            'buff_session',
+            'steam_cookies',
+            'proxy_url',
+            'max_threads',
+            'game_type',
+            'min_sell_price',
+            'max_sell_price',
+            'min_sell_count',
+            'web_auth'
+        ];
+
+    fields.forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            element.addEventListener('change', function() {
+                // 延迟保存，避免频繁操作
+                setTimeout(() => {
+                    const config = getFormConfig();
+                    console.log('配置已自动保存');
+                }, 500);
+            });
+        }
+    });
+}
+
+// 在DOMContentLoaded事件中调用
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedConfig = loadConfig();
+        if (savedConfig) {
+            applyConfigToForm(savedConfig);
+        }
+
+        // 设置自动保存
+        setupAutoSave();
+
+        checkCrawlerStatus();
+        fetchData();
     });
 
     document.querySelectorAll('.sidebar a').forEach(link => {
@@ -474,7 +542,8 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                }
+                },
+                credentials: 'include'
             }).then(response => {
                 if (response.ok) {
                     window.location.href = '/login';
@@ -521,28 +590,58 @@
         return item[key] !== undefined && item[key] !== null ? item[key] : (key === 'name' ? '' : 0);
     }
 
-    function saveConfig() {
-        const config = getFormConfig();
-        localStorage.setItem('crawler_config', JSON.stringify(config));
-        log('配置已自动保存。', 'crawler');
+// 保存配置到localStorage
+function saveConfig(config) {
+    try {
+        localStorage.setItem('scraperConfig', JSON.stringify(config));
+        console.log('配置已保存');
+    } catch (error) {
+        console.error('保存配置失败:', error);
     }
+}
 
-    function loadConfig() {
-        const savedConfig = localStorage.getItem('crawler_config');
-        if (savedConfig) {
-            const config = JSON.parse(savedConfig);
-            document.getElementById('proxy-url').value = config.proxy_url || '';
-            document.getElementById('max-threads').value = config.max_threads || '2';
-            document.getElementById('min-sell-count').value = config.min_sell_count || '20';
-            document.getElementById('min-sell-price').value = config.min_sell_price || '25';
-            document.getElementById('max-sell-price').value = config.max_sell_price || '300';
-            document.getElementById('buff-session').value = config.buff_session || '';
-            document.getElementById('steam-cookies').value = config.steam_cookies || '';
-            document.getElementById('web-auth').checked = config.web_auth || false;
-            document.querySelector(`input[name="game-type"][value="${config.game_type}"]`).checked = true;
-            log('已加载上次保存的配置。', 'crawler');
+// 从localStorage加载配置
+function loadConfig() {
+    try {
+        const saved = localStorage.getItem('scraperConfig');
+        if (saved) {
+            const config = JSON.parse(saved);
+            console.log('已加载保存的配置');
+            return config;
         }
+    } catch (error) {
+        console.error('加载配置失败:', error);
     }
+    return null;
+}
+
+// 应用配置到表单
+function applyConfigToForm(config) {
+    if (!config) return;
+
+    // 设置表单字段值
+    const fields = [
+        'buff_session',
+        'steam_cookies',
+        'proxy_url',
+        'max_threads',
+        'game_type',
+        'min_sell_price',
+        'max_sell_price',
+        'min_sell_count'
+    ];
+
+    fields.forEach(field => {
+        const element = document.getElementById(field);
+        if (element && config[field] !== undefined) {
+            if (element.type === 'checkbox') {
+                element.checked = config[field];
+            } else {
+                element.value = config[field];
+            }
+        }
+    });
+}
 
     function log(message, type) {
         const p = document.createElement('p');
@@ -562,7 +661,8 @@
             const response = await fetch('/api/test_connection', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(getFormConfig())
+                body: JSON.stringify(getFormConfig()),
+                credentials: 'include'
             });
             const result = await response.json();
 
@@ -582,20 +682,26 @@
         }
     }
 
-    function getFormConfig() {
-        const gameType = document.querySelector('input[name="game-type"]:checked').value;
-        return {
-            proxy_url: document.getElementById('proxy-url').value,
-            max_threads: document.getElementById('max-threads').value,
-            game_type: gameType,
-            min_sell_count: document.getElementById('min-sell-count').value,
-            min_sell_price: document.getElementById('min-sell-price').value,
-            max_sell_price: document.getElementById('max-sell-price').value,
-            buff_session: document.getElementById('buff-session').value,
-            steam_cookies: document.getElementById('steam-cookies').value,
-            web_auth: document.getElementById('web-auth').checked
-        };
-    }
+function getFormConfig() {
+    const config = {
+        buff_session: document.getElementById('buff_session')?.value || '',
+        steam_cookies: document.getElementById('steam_cookies')?.value || '',
+        proxy_url: document.getElementById('proxy_url')?.value || '',
+        max_threads: document.getElementById('max_threads')?.value || '2',
+        game_type: document.getElementById('game_type')?.value || 'CSGO',
+        min_sell_price: document.getElementById('min_sell_price')?.value || '25',
+        max_sell_price: document.getElementById('max_sell_price')?.value || '300',
+        min_sell_count: document.getElementById('min_sell_count')?.value || '20',
+        web_auth: document.getElementById('web_auth')?.checked || false
+    };
+
+    // 保存配置
+    saveConfig(config);
+
+    return config;
+}
+
+
 
     async function toggleCrawler() {
         const status = await getCrawlerStatus();
@@ -606,36 +712,56 @@
         }
     }
 
-    async function startCrawler() {
-        const config = getFormConfig();
-        log('正在启动爬虫...', 'crawler');
+async function startCrawler() {
+    const config = getFormConfig();
+    log('正在启动爬虫...', 'crawler');
 
-        try {
-            const response = await fetch('/api/start_crawler', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            });
-            const result = await response.json();
-            log(result.message, 'crawler');
+    try {
+        const response = await fetch('/api/start_crawler', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config),
+            credentials: 'include'
+        });
 
-            if (response.ok) {
-                updateToggleButton('running');
-                if (dataInterval) {
-                    clearInterval(dataInterval);
-                }
-                fetchData();
-                dataInterval = setInterval(fetchData, 2000);
-            }
-        } catch (error) {
-            log(`启动爬虫失败: ${error}`, 'crawler');
+        // 使用通用检查函数
+        const validResponse = await checkResponse(response);
+        if (!validResponse) {
+            log('会话已过期，请重新登录', 'crawler');
+            return;
         }
+
+        const result = await response.json();
+        log(result.message, 'crawler');
+
+        if (response.ok) {
+            updateToggleButton('running');
+            if (dataInterval) {
+                clearInterval(dataInterval);
+            }
+            fetchData();
+            // 降低刷新频率从2秒改为5秒
+            dataInterval = setInterval(fetchData, 5000);
+        }
+    } catch (error) {
+        log(`启动爬虫失败: ${error}`, 'crawler');
     }
+}
 
     async function stopCrawler() {
         log('正在停止爬虫...', 'crawler');
         try {
-            const response = await fetch('/api/stop_crawler', { method: 'POST' });
+            const response = await fetch('/api/stop_crawler', { 
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            const validResponse = await checkResponse(response);
+            if (!validResponse) {
+                log('会话已过期，请重新登录', 'crawler');
+                return;
+            }
+            
             const result = await response.json();
             log(result.message, 'crawler');
 
@@ -650,7 +776,15 @@
 
     async function getCrawlerStatus() {
         try {
-            const response = await fetch('/api/status');
+            const response = await fetch('/api/status', {
+                credentials: 'include'
+            });
+            
+            const validResponse = await checkResponse(response);
+            if (!validResponse) {
+                return 'stopped';
+            }
+            
             const result = await response.json();
             return result.status;
         } catch (error) {
@@ -669,17 +803,18 @@
         }
     }
 
-    async function checkCrawlerStatus() {
-        const status = await getCrawlerStatus();
-        updateToggleButton(status);
-        if (status === 'running' && !dataInterval) {
-            fetchData();
-            dataInterval = setInterval(fetchData, 2000);
-        } else if (status === 'stopped' && dataInterval) {
-            clearInterval(dataInterval);
-            dataInterval = null;
-        }
+async function checkCrawlerStatus() {
+    const status = await getCrawlerStatus();
+    updateToggleButton(status);
+    if (status === 'running' && !dataInterval) {
+        fetchData();
+        // 这里也改为5秒
+        dataInterval = setInterval(fetchData, 5000);
+    } else if (status === 'stopped' && dataInterval) {
+        clearInterval(dataInterval);
+        dataInterval = null;
     }
+}
 
     async function clearData() {
         if (!confirm("确定要清空所有数据吗？此操作将永久删除本地文件。")) {
@@ -687,7 +822,17 @@
         }
         log("正在清空数据...", 'crawler');
         try {
-            const response = await fetch('/api/clear_data', { method: 'POST' });
+            const response = await fetch('/api/clear_data', { 
+                method: 'POST',
+                credentials: 'include'
+            });
+            
+            const validResponse = await checkResponse(response);
+            if (!validResponse) {
+                log('会话已过期，请重新登录', 'crawler');
+                return;
+            }
+            
             const result = await response.json();
             log(result.message, 'crawler');
             if (response.ok) {
@@ -702,18 +847,49 @@
         }
     }
 
-    async function fetchData() {
-        try {
-            const response = await fetch('/api/data');
-            const result = await response.json();
-            allData = result.data;
-            renderTable();
-            renderPagination();
-            updateStats();
-        } catch (error) {
-            log(`获取数据失败: ${error}`, 'crawler');
-        }
+async function fetchData() {
+    // 防止重复请求
+    if (isLoading) {
+        return;
     }
+
+    isLoading = true;
+
+    try {
+        const response = await fetch('/api/data', {
+            credentials: 'include'
+        });
+        
+        const validResponse = await checkResponse(response);
+        if (!validResponse) {
+            isLoading = false;
+            return;
+        }
+        
+        const result = await response.json();
+
+        if (result.success && result.data) {
+            // 计算数据的简单哈希值来检测变化
+            const currentDataHash = JSON.stringify(result.data).length + '_' + result.data.length;
+
+            // 只有在数据真正变化时才更新显示
+            if (currentDataHash !== lastDataHash) {
+                allData = result.data;
+                renderTable();
+                renderPagination();
+                updateStats();
+                lastDataHash = currentDataHash;
+                console.log('数据已更新，共', result.data.length, '条记录');
+            } else {
+                console.log('数据无变化，跳过渲染');
+            }
+        }
+    } catch (error) {
+        log(`获取数据失败: ${error}`, 'crawler');
+    } finally {
+        isLoading = false;
+    }
+}
 
     function updateStats() {
         totalItemsSpan.textContent = allData.length;
@@ -723,49 +899,52 @@
         currentPageItemsSpan.textContent = pageData.length;
     }
 
-    function renderTable() {
-        dataTableBody.innerHTML = '';
+function renderTable() {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const pageData = allData.slice(startIndex, endIndex);
 
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        const endIndex = startIndex + ITEMS_PER_PAGE;
-        const pageData = allData.slice(startIndex, endIndex);
-
-        if (pageData.length === 0) {
-            const row = document.createElement('tr');
-            row.innerHTML = `<td colspan="10" style="text-align: center;">暂无数据</td>`;
-            dataTableBody.appendChild(row);
-            return;
+    // 如果当前页数据为空，显示无数据提示
+    if (pageData.length === 0) {
+        if (dataTableBody.children.length !== 1 ||
+            !dataTableBody.firstElementChild.textContent.includes('暂无数据')) {
+            dataTableBody.innerHTML = `<tr><td colspan="10" style="text-align: center;">暂无数据</td></tr>`;
         }
-
-        pageData.forEach(item => {
-            const row = document.createElement('tr');
-            const buffLink = `https://buff.163.com/goods/${item.buff_id}`;
-            const steamLink = `https://steamcommunity.com/market/listings/${item.steam_market_id}`;
-
-            // Calculate ratios in frontend for display
-            const steamSellRatio = item.buff_sell_price && item.steam_sell_price ?
-                                    (item.buff_sell_price / (item.steam_sell_price * 0.85)).toFixed(2) : 'N/A';
-            const steamBuyRatio = item.buff_buy_price && item.steam_buy_price ?
-                                   (item.buff_buy_price / (item.steam_buy_price * 1.15)).toFixed(2) : 'N/A';
-
-
-            row.innerHTML = `
-                <td>${item.name || 'N/A'}</td>
-                <td><a href="${buffLink}" target="_blank">B</a> | <a href="${steamLink}" target="_blank">S</a></td>
-                <td>${item.buff_sell_price || 'N/A'}</td>
-                <td>${item.steam_sell_price || 'N/A'}</td>
-                <td>${steamBuyRatio}</td>
-                <td>${steamSellRatio}</td>
-                <td>${item.buff_sell_num || 'N/A'}</td>
-                <td>${item.steam_sell_num || 'N/A'}</td>
-                <td>${item.steam_volume || 'N/A'}</td>
-                <td>${item.update_time || 'N/A'}</td>
-            `;
-            dataTableBody.appendChild(row);
-        });
+        return;
     }
 
-    function renderPagination() {
+    // 生成新的HTML内容
+    const newHTML = pageData.map(item => {
+        const profit = (item.steam_sell_price * 0.85 - item.buff_sell_price).toFixed(2);
+        const profitRate = item.buff_sell_price > 0 ?
+            (((item.steam_sell_price * 0.85 - item.buff_sell_price) / item.buff_sell_price) * 100).toFixed(2) : 0;
+
+        return `
+            <tr>
+                <td>${item.name || 'N/A'}</td>
+                <td>¥${item.buff_sell_price || 'N/A'}</td>
+                <td>¥${item.steam_sell_price || 'N/A'}</td>
+                <td>¥${profit}</td>
+                <td>${profitRate}%</td>
+                <td>${item.steam_volume || 'N/A'}</td>
+                <td>${item.buff_sell_num || 'N/A'}</td>
+                <td>${item.steam_sell_num || 'N/A'}</td>
+                <td>${item.update_time || 'N/A'}</td>
+                <td>
+                    <a href="https://buff.163.com/goods/${item.buff_id}" target="_blank">Buff</a> |
+                    <a href="https://steamcommunity.com/market/listings/${item.steam_market_id}" target="_blank">Steam</a>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // 只有在内容真正不同时才更新DOM
+    if (dataTableBody.innerHTML !== newHTML) {
+        dataTableBody.innerHTML = newHTML;
+    }
+}
+
+function renderPagination() {
         paginationContainer.innerHTML = '';
         const totalPages = Math.ceil(allData.length / ITEMS_PER_PAGE);
 

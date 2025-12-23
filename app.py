@@ -1,83 +1,110 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask_cors import CORS
 import threading
 import time
 import requests
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import random
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+from contextlib import contextmanager
+import urllib3
+
+# 假设 database.py 存在并处理 items 表
+try:
+    from database import db
+except ImportError:
+    # 简单的 mock，防止代码直接运行报错，实际使用请确保 database.py 存在
+    class MockDB:
+        def load_items(self): return []
+
+        def save_items(self, items): pass
+
+        def get_count(self): return 0
+
+        @property
+        def db_path(self): return os.path.join('data', 'items.db')
+
+
+    db = MockDB()
+
+# 禁用 SSL 警告（因为使用了 verify=False）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in-production'
 
+# Session 配置
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # session 有效期 24 小时
+app.config['SESSION_COOKIE_SECURE'] = False  # HTTP 环境设为 False，HTTPS 环境设为 True
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # 防止 XSS 攻击
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # 防止 CSRF 攻击，Lax 允许部分跨站请求
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True  # 每次请求都刷新 session 过期时间
+
+CORS(app, supports_credentials=True)
+
 DATA_DIR = 'data'
-DATA_FILE = os.path.join(DATA_DIR, 'crawled_data.json')
 DB_FILE = os.path.join(DATA_DIR, 'users.db')
-crawled_data = []
+
+# 全局状态控制
 is_crawling = False
 crawler_thread = None
-db_lock = threading.Lock()
 
 
-# 初始化数据库和创建默认用户
+# ===================== 数据库辅助函数 =====================
+
+@contextmanager
+def get_db_connection():
+    """数据库连接上下文管理器，自动处理关闭"""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def init_db():
     """Initialize SQLite database and create default users"""
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
 
-    # 创建用户表
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_admin BOOLEAN DEFAULT 0,
-        is_active BOOLEAN DEFAULT 1
-    )
-    ''')
-
-    # 创建配置表，用于存储系统配置
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS system_config (
-        id INTEGER PRIMARY KEY,
-        setting_key TEXT UNIQUE NOT NULL,
-        setting_value TEXT,
-        description TEXT
-    )
-    ''')
-
-    # 插入默认管理员用户（密码：admin123）
-    cursor.execute("SELECT * FROM users WHERE username = ?", ('admin',))
-    if not cursor.fetchone():
-        password_hash = generate_password_hash('admin123')
-        cursor.execute(
-            "INSERT INTO users (username, password_hash, is_admin, is_active) VALUES (?, ?, 1, 1)",
-            ('admin', password_hash)
+        # 创建用户表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_admin BOOLEAN DEFAULT 0,
+            is_active BOOLEAN DEFAULT 1
         )
-        print("创建默认管理员用户: admin / admin123")
+        ''')
 
-    # 插入默认普通用户（密码：user123）
-    cursor.execute("SELECT * FROM users WHERE username = ?", ('user',))
-    if not cursor.fetchone():
-        password_hash = generate_password_hash('user123')
-        cursor.execute(
-            "INSERT INTO users (username, password_hash, is_admin, is_active) VALUES (?, ?, 0, 1)",
-            ('user', password_hash)
+        # 创建配置表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_config (
+            id INTEGER PRIMARY KEY,
+            setting_key TEXT UNIQUE NOT NULL,
+            setting_value TEXT,
+            description TEXT
         )
-        print("创建默认普通用户: user / user123")
+        ''')
 
-    # 插入系统配置
-    cursor.execute(
-        "INSERT OR IGNORE INTO system_config (setting_key, setting_value, description) VALUES ('allow_login', '1', '是否允许登录')")
-    cursor.execute(
-        "INSERT OR IGNORE INTO system_config (setting_key, setting_value, description) VALUES ('max_login_attempts', '5', '最大登录尝试次数')")
+        # 插入默认管理员
+        cursor.execute("SELECT id FROM users WHERE username = ?", ('admin',))
+        if not cursor.fetchone():
+            password_hash = generate_password_hash('admin123')
+            cursor.execute(
+                "INSERT INTO users (username, password_hash, is_admin, is_active) VALUES (?, ?, 1, 1)",
+                ('admin', password_hash)
+            )
+            print("创建默认管理员用户: admin / admin123")
 
     # 创建市场物品数据表
     cursor.execute('''
@@ -108,7 +135,8 @@ def init_db():
     print("数据库初始化完成")
 
 
-# 登录装饰器
+# ===================== 装饰器 =====================
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -119,22 +147,26 @@ def login_required(f):
     return decorated_function
 
 
-# 管理员权限装饰器
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             return redirect(url_for('login'))
 
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT is_admin FROM users WHERE id = ?", (session['user_id'],))
-        user = cursor.fetchone()
-        conn.close()
+        # 优先使用 session 中的缓存状态，减少数据库查询
+        if session.get('is_admin'):
+            return f(*args, **kwargs)
+
+        # 如果 session 中没有，再查库（双重保险）
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT is_admin FROM users WHERE id = ?", (session['user_id'],))
+            user = cursor.fetchone()
 
         if not user or not user[0]:
             return jsonify({"error": "需要管理员权限"}), 403
 
+        session['is_admin'] = True  # 更新缓存
         return f(*args, **kwargs)
 
     return decorated_function
@@ -176,6 +208,11 @@ def load_data_from_db():
         print(f"从数据库加载数据时出错: {e}")
         crawled_data = []
 
+    formatted_items = []
+    for item in new_items:
+        # 安全获取数值，防止 NoneType 错误
+        steam_price = item.get('steam_sell_price', 0) or 0
+        buff_price = item.get('buff_sell_price', 0) or 0
 
 def save_item_to_db(item):
     """Save or update a single item to SQLite database."""
@@ -210,9 +247,7 @@ def save_item_to_db(item):
 
 
 def parse_cookies_string(cookie_string):
-    """
-    Parses a semicolon-separated cookie string into a dictionary.
-    """
+    """解析 cookie 字符串为字典"""
     if not cookie_string:
         return {}
     cookies = {}
@@ -223,47 +258,54 @@ def parse_cookies_string(cookie_string):
     return cookies
 
 
+# ===================== 爬虫服务类 =====================
+
 class ScraperService:
     def __init__(self, config):
         self.config = config
         self.session = requests.Session()
+
+        # 优化：添加更真实的 Headers
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "X-Requested-With": "XMLHttpRequest"
         })
 
-        # 修复代理配置逻辑
+        self._configure_proxy()
+
+    def _configure_proxy(self):
+        """配置代理"""
         proxy_url = self.config.get("proxy_url")
-        if proxy_url and proxy_url.strip():
-            # 定义无效的代理URL列表
-            invalid_proxy_urls = [
-                "https://store.steampowered.com/",
-                "http://store.steampowered.com/",
-                "https://steamcommunity.com/",
-                "http://steamcommunity.com/",
-                "https://steamcommunity.com/market/",
-                "http://steamcommunity.com/market/",
-                "https://buff.163.com/",
-                "http://buff.163.com/"
-            ]
-
-            # 检查是否是有效的代理URL
-            if proxy_url not in invalid_proxy_urls:
-                # 确保代理URL格式正确
-                if not proxy_url.startswith(('http://', 'https://', 'socks5://')):
-                    proxy_url = 'http://' + proxy_url
-
-                self.session.proxies = {
-                    "http": proxy_url,
-                    "https": proxy_url
-                }
-                self.session.verify = False
-                print(f"已配置代理: {proxy_url}")
-            else:
-                print(f"检测到无效代理URL: {proxy_url}，将不使用代理")
-                self.session.proxies = {}
-        else:
+        if not proxy_url or not proxy_url.strip():
             print("未配置代理或代理URL为空")
             self.session.proxies = {}
+            return
+
+        # 无效代理列表检查 (保留原有逻辑)
+        invalid_proxy_urls = [
+            "https://store.steampowered.com/", "http://store.steampowered.com/",
+            "https://steamcommunity.com/", "http://steamcommunity.com/",
+            "https://steamcommunity.com/market/", "http://steamcommunity.com/market/",
+            "https://buff.163.com/", "http://buff.163.com/"
+        ]
+
+        if proxy_url in invalid_proxy_urls:
+            print(f"检测到无效代理URL: {proxy_url}，将不使用代理")
+            self.session.proxies = {}
+            return
+
+        # 格式化代理 URL
+        if not proxy_url.startswith(('http://', 'https://', 'socks5://')):
+            proxy_url = 'http://' + proxy_url
+
+        self.session.proxies = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+        self.session.verify = False  # 禁用 SSL 验证以支持某些代理
+        print(f"已配置代理: {proxy_url}")
 
     def get_buff_items(self, page_num):
         params = {
@@ -271,142 +313,142 @@ class ScraperService:
             "min_price": self.config["min_sell_price"],
             "max_price": self.config["max_sell_price"],
             "page_num": page_num,
+            "sort_by": "price.asc",  # 通常需要排序
+            "_": int(time.time() * 1000)  # 防止缓存
         }
-        cookies = {"session": self.config["buff_session"]}
+        # 如果 buff_session 存在，合并到请求中
+        cookies = {"session": self.config["buff_session"]} if self.config.get("buff_session") else {}
 
         try:
-            # 直接使用requests.get而不是session
-            response = requests.get(
+            # FIX: 使用 self.session.get 而不是 requests.get，确保代理生效
+            response = self.session.get(
                 "https://buff.163.com/api/market/goods",
                 params=params,
                 cookies=cookies,
-                timeout=10,
-                verify=False  # 如果有SSL问题
+                timeout=15
             )
             response.raise_for_status()
             data = response.json()
-            if "data" in data and "items" in data["data"] and "total_page" in data["data"]:
-                return data["data"]["items"], data["data"]["total_page"]
+
+            if data.get("code") == "OK" and "data" in data:
+                items = data["data"].get("items", [])
+                total_page = data["data"].get("total_page", 0)
+                return items, total_page
             else:
-                print("Buff API 返回了非预期的 JSON 格式。")
-                print("完整的响应内容如下：", json.dumps(data, indent=2))
+                print(f"Buff API 错误: {data.get('error') or '未知错误'}")
                 return [], 0
-        except requests.exceptions.RequestException as e:
+
+        except Exception as e:
             print(f"获取 Buff 数据时发生错误: {e}")
-            return [], 0
-        except json.JSONDecodeError:
-            print("Buff API 返回的内容无法解析为 JSON。")
             return [], 0
 
     def get_steam_price_overview(self, appid, market_hash_name):
-        """Fetches price overview including volume for a Steam item."""
         url = f"https://steamcommunity.com/market/priceoverview/?appid={appid}&market_hash_name={market_hash_name}&currency=23"
-        steam_cookies_dict = parse_cookies_string(self.config["steam_cookies"])
+        steam_cookies = parse_cookies_string(self.config["steam_cookies"])
+
         try:
-            response = self.session.get(url, cookies=steam_cookies_dict, timeout=10)
+            # FIX: 使用 self.session
+            response = self.session.get(url, cookies=steam_cookies, timeout=15)
+
+            if response.status_code == 429:
+                print("Steam API 请求过多 (429)，暂停 30 秒...")
+                time.sleep(30)
+                return 0
+
             response.raise_for_status()
             data = response.json()
 
-            print(f"Raw Steam priceoverview data for {market_hash_name}: {data}")
-
             if data.get('success'):
-                volume_str = data.get('volume', '0').replace(',', '')
+                volume_str = str(data.get('volume', '0')).replace(',', '')
                 return int(volume_str) if volume_str.isdigit() else 0
-        except requests.exceptions.RequestException as e:
-            print(f"获取 Steam 价格概览时发生网络错误: {e}")
-        except (KeyError, ValueError, json.JSONDecodeError) as e:
-            print(f"解析 Steam 价格概览数据时出错: {e}")
-
+        except Exception as e:
+            print(f"获取 Steam 销量失败 ({market_hash_name}): {e}")
         return 0
 
     def get_steam_data(self, item):
+        market_url = item.get("steam_market_url")
+        if not market_url:
+            return None
+
+        steam_cookies = parse_cookies_string(self.config["steam_cookies"])
+
         try:
-            market_url = item["steam_market_url"]
-            steam_cookies_dict = parse_cookies_string(self.config["steam_cookies"])
-
-            try:
-                response = self.session.get(market_url, cookies=steam_cookies_dict, timeout=10)
-                response.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                print(
-                    f"获取 Steam 市场页面时发生 HTTP 错误 ({item['name']}): {e.response.status_code} - {e.response.reason}")
-                return None
-            except requests.exceptions.RequestException as e:
-                print(f"获取 Steam 市场页面时发生网络错误 ({item['name']}): {e}")
-                return None
-
+            # 1. 获取市场页面 HTML
+            # FIX: 使用 self.session
+            response = self.session.get(market_url, cookies=steam_cookies, timeout=15)
+            response.raise_for_status()
             market_html = response.text
-            match = re.search(r"Market_LoadOrderSpread\(\s(\d+)\s\);", market_html)
+
+            # 提取 Market ID
+            match = re.search(r"Market_LoadOrderSpread\s*\(\s*(\d+)\s*\)", market_html)
             if not match:
-                print(f"Market ID not found for {item['name']}. Skipping.")
+                # 尝试另一种常见的匹配格式
+                match = re.search(r"Market_LoadOrderSpread\$\s+(\d+)", market_html)
+
+            if not match:
+                print(f"无法找到 Market ID: {item['name']}")
                 return None
+
             market_id = match.group(1)
 
+            # 2. 获取直方图数据 (API)
             api_url = f"https://steamcommunity.com/market/itemordershistogram?country=CN&language=schinese&currency=23&item_nameid={market_id}"
+            api_response = self.session.get(api_url, cookies=steam_cookies, timeout=15)
+            api_response.raise_for_status()
 
-            try:
-                api_response = self.session.get(api_url, cookies=steam_cookies_dict, timeout=10)
-                api_response.raise_for_status()
-                api_data = api_response.json()
-            except requests.exceptions.HTTPError as e:
-                print(
-                    f"获取 Steam API 数据时发生 HTTP 错误 ({item['name']}): {e.response.status_code} - {e.response.reason}")
-                return None
-            except requests.exceptions.RequestException as e:
-                print(f"获取 Steam API 数据时发生网络错误 ({item['name']}): {e}")
-                return None
-            except json.JSONDecodeError as e:
-                print(f"解析 Steam API JSON 时发生错误 ({item['name']}): {e}")
-                print(f"非 JSON 响应内容为: {api_response.text}")
+            # 检查是否返回了 HTML (通常意味着需要登录或被风控)
+            if api_response.text.strip().startswith('<'):
+                print(f"Steam API 返回了 HTML 而非 JSON ({item['name']}) - 可能是 Cookie 失效")
                 return None
 
+            api_data = api_response.json()
+
+            # 解析数据
             sell_table = api_data.get("sell_order_table", "")
             buy_table = api_data.get("buy_order_table", "")
 
-            sell_price_match = re.search(r"¥ (\d+\.\d{2})", sell_table)
-            buy_price_match = re.search(r"¥ (\d+\.\d{2})", buy_table)
-            sell_num_match = re.search(r">(\d+)</span>\s个出售中", api_data.get("sell_order_summary", ""))
+            # 使用更健壮的正则
+            sell_price_match = re.search(r"¥\s*(\d+\.\d{2})", sell_table)
+            buy_price_match = re.search(r"¥\s*(\d+\.\d{2})", buy_table)
 
+            # 解析总出售数量
+            sell_summary = api_data.get("sell_order_summary", "")
+            sell_num_match = re.search(r">(\d+)<", sell_summary)
+            if not sell_num_match:
+                sell_num_match = re.search(r"(\d+)", sell_summary)
+
+            # 3. 提取 AppID 和 HashName 以获取销量
             appid_match = re.search(r'listings/(\d+)/', market_url)
             market_hash_name_match = re.search(r'listings/\d+/(.*)', market_url)
 
-            appid = appid_match.group(1) if appid_match else None
-            market_hash_name = market_hash_name_match.group(1) if market_hash_name_match else None
-
             steam_volume = 0
-            if appid and market_hash_name:
-                steam_volume = self.get_steam_price_overview(appid, market_hash_name)
+            if appid_match and market_hash_name_match:
+                # 对 URL 编码的名称进行解码处理
+                raw_hash_name = market_hash_name_match.group(1)
+                steam_volume = self.get_steam_price_overview(appid_match.group(1), raw_hash_name)
 
-            steam_sell_price = float(sell_price_match.group(1)) if sell_price_match else 0
-            steam_buy_price = float(buy_price_match.group(1)) if buy_price_match else 0
-            steam_sell_num = int(sell_num_match.group(1)) if sell_num_match else 0
-
-            processed_item = {
+            return {
                 "name": item["name"],
                 "kind": item["game"],
                 "buff_id": item["id"],
-                "steam_market_id": market_url.replace("https://steamcommunity.com/market/listings/", ""),
+                "steam_market_id": market_url.split('/')[-1],
                 "buff_buy_price": float(item["buy_max_price"]),
                 "buff_sell_price": float(item["sell_min_price"]),
-                "steam_sell_price": steam_sell_price,
-                "steam_buy_price": steam_buy_price,
-                "steam_sell_num": steam_sell_num,
+                "steam_sell_price": float(sell_price_match.group(1)) if sell_price_match else 0,
+                "steam_buy_price": float(buy_price_match.group(1)) if buy_price_match else 0,
+                "steam_sell_num": int(sell_num_match.group(1)) if sell_num_match else 0,
                 "buff_sell_num": item["sell_num"],
                 "steam_volume": steam_volume,
                 "update_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            return processed_item
 
-        except requests.exceptions.RequestException as e:
-            print(f"获取 Steam 市场页面时发生错误 ({item['name']}): {e}")
-            return None
-        except (KeyError, IndexError) as e:
-            print(f"解析 Steam 市场数据时缺少键值 ({item['name']}): {e}")
+        except Exception as e:
+            print(f"处理 Steam 数据出错 ({item['name']}): {e}")
             return None
 
 
 def run_crawler(config):
-    global is_crawling, crawled_data
+    global is_crawling
     is_crawling = True
 
     print(f"使用配置启动爬虫: {config}")
@@ -414,17 +456,21 @@ def run_crawler(config):
     scraper = ScraperService(config)
     page_num = 1
     total_pages = 10
+    new_items = []
 
-    while is_crawling:
-        try:
-            items, total_pages_from_buff = scraper.get_buff_items(page_num)
-            if total_pages_from_buff > 0:
-                total_pages = total_pages_from_buff
+    try:
+        while is_crawling:
+            items, total_pages_buff = scraper.get_buff_items(page_num)
+
+            if total_pages_buff > 0:
+                total_pages = total_pages_buff
 
             if not items:
-                print("本页没有找到物品。正在从第一页重新开始。")
-                page_num = 1
-                time.sleep(5)
+                print(f"页面 {page_num} 无物品，稍后重试...")
+                time.sleep(random.uniform(3, 5))
+                # 如果连续失败，可以考虑重置到第1页或停止
+                if page_num > 1:
+                    page_num = 1
                 continue
 
             for item in items:
@@ -432,7 +478,11 @@ def run_crawler(config):
                     break
 
                 if item["sell_num"] >= int(config["min_sell_count"]):
-                    processed_item = scraper.get_steam_data(item)
+                    # 构造临时对象传递给 get_steam_data 提取 URL
+                    # 注意：Buff API 返回的 goods_info 包含 steam_market_url
+                    temp_item = item.copy()
+                    temp_item['steam_market_url'] = item.get(
+                        'steam_market_url') or f"https://steamcommunity.com/market/listings/{item.get('appid')}/{item.get('market_hash_name')}"
 
                     if processed_item and processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
                         sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)
@@ -457,125 +507,108 @@ def run_crawler(config):
 
             page_num += 1
             if page_num > total_pages:
-                print("已达到页面上限，正在从第一页重新开始。")
+                print("已遍历所有页面，重新开始...")
                 page_num = 1
-
-            if is_crawling:
-                print(f"Processing next page from Buff after 10-second break...")
                 time.sleep(10)
 
-        except Exception as e:
-            print(f"发生一个未预料的错误: {e}")
-            time.sleep(10)
+            if is_crawling:
+                print(f"准备抓取第 {page_num} 页...")
+                time.sleep(random.uniform(5, 10))
 
-    is_crawling = False
-    print("爬虫已停止。")
+    except Exception as e:
+        print(f"爬虫线程发生未捕获异常: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        is_crawling = False
+        print("爬虫线程已结束。")
+
 
 def test_connection(url, cookies=None, proxy=None):
-        try:
-            proxies = {"http": proxy, "https": proxy} if proxy else None
-            # 使用 verify=False 禁用 SSL 验证
-            response = requests.get(url, timeout=10, cookies=cookies, proxies=proxies, verify=False)
-            response.raise_for_status()
-            return True, "连接成功"
-        except requests.exceptions.RequestException as e:
-            return False, str(e)
+    """测试连接工具函数"""
+    try:
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+        }
+        response = requests.get(
+            url,
+            timeout=10,
+            cookies=cookies,
+            proxies=proxies,
+            headers=headers,
+            verify=False
+        )
+        response.raise_for_status()
+        return True, f"连接成功 (HTTP {response.status_code})"
+    except Exception as e:
+        return False, str(e)
 
 
-# 新的API路由处理函数
+# ===================== API 路由 =====================
+
 @app.route('/api/test_connection', methods=['POST'])
 def api_test_connection():
     try:
-        # 获取前端发送的配置
         config = request.get_json()
-        print(f"收到配置: {config}")
-
-        # 从配置中提取需要的参数
-        proxy_url = config.get('proxy_url')  # 注意：这里是proxy_url不是proxy
+        proxy_url = config.get('proxy_url')
         steam_cookies_str = config.get('steam_cookies')
         buff_session = config.get('buff_session')
 
-        # 处理Steam cookies - 将字符串转换为字典
-        steam_cookies = {}
-        if steam_cookies_str:
-            try:
-                # 解析cookie字符串 "key1=value1; key2=value2"
-                for cookie in steam_cookies_str.split(';'):
-                    if '=' in cookie:
-                        key, value = cookie.strip().split('=', 1)
-                        steam_cookies[key] = value
-            except Exception as e:
-                print(f"解析Steam cookies失败: {e}")
+        steam_cookies = parse_cookies_string(steam_cookies_str)
+        buff_cookies = {'session': buff_session} if buff_session else {}
 
-        # 处理Buff cookies
-        buff_cookies = {}
-        if buff_session:
-            buff_cookies['session'] = buff_session
+        # 过滤无效代理逻辑
+        invalid_list = ["https://store.steampowered.com/", "http://store.steampowered.com/"]  # 简化的列表
+        effective_proxy = proxy_url if proxy_url and proxy_url not in invalid_list else None
 
-        # 测试Steam连接
-        steam_success, steam_message = test_connection(
+        # 修正：确保代理带有 scheme
+        if effective_proxy and not effective_proxy.startswith(('http', 'socks')):
+            effective_proxy = f"http://{effective_proxy}"
+
+        steam_success, steam_msg = test_connection(
             "https://steamcommunity.com/market/",
             cookies=steam_cookies,
-            proxy=proxy_url if proxy_url != "https://store.steampowered.com/" else None
+            proxy=effective_proxy
         )
 
-        # 测试Buff连接
-        buff_success, buff_message = test_connection(
+        buff_success, buff_msg = test_connection(
             "https://buff.163.com",
             cookies=buff_cookies,
-            proxy=proxy_url if proxy_url != "https://store.steampowered.com/" else None
+            proxy=effective_proxy
         )
 
-        # 返回JSON响应
         return jsonify({
-            'buff': {
-                'success': buff_success,
-                'message': buff_message
-            },
-            'steam': {
-                'success': steam_success,
-                'message': steam_message
-            }
+            'buff': {'success': buff_success, 'message': buff_msg},
+            'steam': {'success': steam_success, 'message': steam_msg}
         })
 
     except Exception as e:
-        print(f"API错误: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
 # ===================== 用户管理路由 =====================
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
 
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, password_hash, is_active FROM users WHERE username = ?", (username,))
-        user = cursor.fetchone()
-        conn.close()
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, password_hash, is_active, is_admin FROM users WHERE username = ?", (username,))
+            user = cursor.fetchone()
 
         if user and user[2] == 1 and check_password_hash(user[1], password):
+            session.permanent = True  # 启用永久 session，使用配置的超时时间
             session['user_id'] = user[0]
             session['username'] = username
-
-            # 检查是否为管理员
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("SELECT is_admin FROM users WHERE id = ?", (user[0],))
-            is_admin = cursor.fetchone()[0]
-            conn.close()
-
-            session['is_admin'] = bool(is_admin)
+            session['is_admin'] = bool(user[3])
             return redirect(url_for('index'))
         else:
-            if user and user[2] == 0:
-                return render_template('login.html', error='账户已被禁用')
-            else:
-                return render_template('login.html', error='用户名或密码错误')
+            error_msg = '账户已被禁用' if (user and user[2] == 0) else '用户名或密码错误'
+            return render_template('login.html', error=error_msg)
 
     return render_template('login.html')
 
@@ -589,11 +622,10 @@ def logout():
 @app.route('/profile')
 @login_required
 def profile():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT username, created_at, is_admin FROM users WHERE id = ?", (session['user_id'],))
-    user = cursor.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, created_at, is_admin FROM users WHERE id = ?", (session['user_id'],))
+        user = cursor.fetchone()
 
     return render_template('profile.html',
                            username=user[0],
@@ -601,17 +633,16 @@ def profile():
                            is_admin=user[2])
 
 
-# ===================== 管理员用户管理路由 =====================
+# ===================== 管理员路由 =====================
+
 @app.route('/admin/users')
 @login_required
 @admin_required
 def admin_users():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users ORDER BY created_at DESC")
-    users = cursor.fetchall()
-    conn.close()
-
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users ORDER BY created_at DESC")
+        users = cursor.fetchall()
     return render_template('admin_users.html', users=users)
 
 
@@ -627,37 +658,31 @@ def admin_add_user():
     if not username or not password:
         return jsonify({"error": "用户名和密码不能为空"}), 400
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
     try:
-        password_hash = generate_password_hash(password)
-        cursor.execute(
-            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
-            (username, password_hash, 1 if is_admin else 0)
-        )
-        conn.commit()
-        user_id = cursor.lastrowid
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            password_hash = generate_password_hash(password)
+            cursor.execute(
+                "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
+                (username, password_hash, 1 if is_admin else 0)
+            )
+            conn.commit()
+            user_id = cursor.lastrowid
 
-        cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users WHERE id = ?", (user_id,))
-        user = cursor.fetchone()
-        conn.close()
+            # 获取新用户信息用于返回
+            cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users WHERE id = ?", (user_id,))
+            user = cursor.fetchone()
 
         return jsonify({
             "message": "用户添加成功",
             "user": {
-                "id": user[0],
-                "username": user[1],
-                "created_at": user[2],
-                "is_admin": user[3],
-                "is_active": user[4]
+                "id": user[0], "username": user[1],
+                "created_at": user[2], "is_admin": user[3], "is_active": user[4]
             }
         }), 201
     except sqlite3.IntegrityError:
-        conn.close()
         return jsonify({"error": "用户名已存在"}), 409
     except Exception as e:
-        conn.close()
         return jsonify({"error": str(e)}), 500
 
 
@@ -666,22 +691,16 @@ def admin_add_user():
 @admin_required
 def admin_update_user(user_id):
     data = request.json
-
-    # 不能修改自己的管理员状态
     if user_id == session['user_id'] and 'is_admin' in data:
         return jsonify({"error": "不能修改自己的管理员权限"}), 400
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
 
     try:
         update_fields = []
         params = []
 
         if 'password' in data and data['password']:
-            password_hash = generate_password_hash(data['password'])
             update_fields.append("password_hash = ?")
-            params.append(password_hash)
+            params.append(generate_password_hash(data['password']))
 
         if 'is_admin' in data:
             update_fields.append("is_admin = ?")
@@ -692,30 +711,27 @@ def admin_update_user(user_id):
             params.append(1 if data['is_active'] else 0)
 
         if not update_fields:
-            conn.close()
             return jsonify({"error": "没有可更新的字段"}), 400
 
         params.append(user_id)
-        query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?"
-        cursor.execute(query, params)
-        conn.commit()
 
-        cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users WHERE id = ?", (user_id,))
-        user = cursor.fetchone()
-        conn.close()
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, params)
+            conn.commit()
+
+            cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users WHERE id = ?", (user_id,))
+            user = cursor.fetchone()
 
         return jsonify({
             "message": "用户更新成功",
             "user": {
-                "id": user[0],
-                "username": user[1],
-                "created_at": user[2],
-                "is_admin": user[3],
-                "is_active": user[4]
+                "id": user[0], "username": user[1],
+                "created_at": user[2], "is_admin": user[3], "is_active": user[4]
             }
         })
     except Exception as e:
-        conn.close()
         return jsonify({"error": str(e)}), 500
 
 
@@ -723,25 +739,20 @@ def admin_update_user(user_id):
 @login_required
 @admin_required
 def admin_delete_user(user_id):
-    # 不能删除自己
     if user_id == session['user_id']:
         return jsonify({"error": "不能删除自己的账户"}), 400
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
     try:
-        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            conn.commit()
         return jsonify({"message": "用户删除成功"})
     except Exception as e:
-        conn.close()
         return jsonify({"error": str(e)}), 500
 
 
-# ===================== 爬虫相关路由（需要登录） =====================
+# ===================== 核心页面路由 =====================
+
 @app.route('/')
 @login_required
 def index():
@@ -758,7 +769,10 @@ def start_crawler():
         return jsonify({"message": "爬虫已在运行中。", "status": "running"}), 409
 
     config = request.json
+    # 重置状态
+    is_crawling = True
     crawler_thread = threading.Thread(target=run_crawler, args=(config,))
+    crawler_thread.daemon = True  # 设置为守护线程，主程序退出时自动结束
     crawler_thread.start()
 
     return jsonify({"message": "爬虫已启动。", "status": "running"})
@@ -772,22 +786,27 @@ def stop_crawler():
         return jsonify({"message": "爬虫未在运行中。", "status": "stopped"}), 409
 
     is_crawling = False
-    return jsonify({"message": "爬虫即将停止。", "status": "stopped"})
+    return jsonify({"message": "爬虫停止信号已发送。", "status": "stopped"})
 
 
 @app.route('/api/status')
 @login_required
 def get_status():
-    global is_crawling
     return jsonify({"status": "running" if is_crawling else "stopped"})
 
 
 @app.route('/api/data')
 @login_required
 def get_data():
-    global crawled_data
-    with db_lock:
-        return jsonify({"data": crawled_data})
+    try:
+        items = db.load_items()
+        return jsonify({
+            "success": True,
+            "data": items,
+            "count": len(items)
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/clear_data', methods=['POST'])
@@ -810,7 +829,6 @@ def clear_data():
 
 
 if __name__ == '__main__':
-    # 初始化数据库
     init_db()
 
     # 加载爬虫数据

@@ -466,15 +466,14 @@
     // 为表单字段添加自动保存功能
     function setupAutoSave() {
         const fields = [
-            'buff_session',
-            'steam_cookies',
-            'proxy_url',
-            'max_threads',
-            'game_type',
-            'min_sell_price',
-            'max_sell_price',
-            'min_sell_count',
-            'web_auth'
+            'buff-session',
+            'steam-cookies',
+            'proxy-url',
+            'max-threads',
+            'min-sell-price',
+            'max-sell-price',
+            'min-sell-count',
+            'web-auth'
         ];
 
     fields.forEach(fieldId => {
@@ -620,27 +619,37 @@ function applyConfigToForm(config) {
     if (!config) return;
 
     // 设置表单字段值
-    const fields = [
-        'buff_session',
-        'steam_cookies',
-        'proxy_url',
-        'max_threads',
-        'game_type',
-        'min_sell_price',
-        'max_sell_price',
-        'min_sell_count'
-    ];
+    const fieldMap = {
+        'buff_session': 'buff-session',
+        'steam_cookies': 'steam-cookies',
+        'proxy_url': 'proxy-url',
+        'max_threads': 'max-threads',
+        'min_sell_price': 'min-sell-price',
+        'max_sell_price': 'max-sell-price',
+        'min_sell_count': 'min-sell-count',
+        'web_auth': 'web-auth'
+    };
 
-    fields.forEach(field => {
-        const element = document.getElementById(field);
-        if (element && config[field] !== undefined) {
+    // 遍历配置对象，使用 fieldMap 映射到正确的 HTML ID
+    Object.keys(fieldMap).forEach(configKey => {
+        const htmlId = fieldMap[configKey];
+        const element = document.getElementById(htmlId);
+        if (element && config[configKey] !== undefined) {
             if (element.type === 'checkbox') {
-                element.checked = config[field];
+                element.checked = config[configKey];
             } else {
-                element.value = config[field];
+                element.value = config[configKey];
             }
         }
     });
+    
+    // 特殊处理游戏类型单选框
+    if (config.game_type) {
+        const radioButton = document.querySelector(`input[name="game_type"][value="${config.game_type}"]`);
+        if (radioButton) {
+            radioButton.checked = true;
+        }
+    }
 }
 
     function log(message, type) {
@@ -684,15 +693,15 @@ function applyConfigToForm(config) {
 
 function getFormConfig() {
     const config = {
-        buff_session: document.getElementById('buff_session')?.value || '',
-        steam_cookies: document.getElementById('steam_cookies')?.value || '',
-        proxy_url: document.getElementById('proxy_url')?.value || '',
-        max_threads: document.getElementById('max_threads')?.value || '2',
-        game_type: document.getElementById('game_type')?.value || 'CSGO',
-        min_sell_price: document.getElementById('min_sell_price')?.value || '25',
-        max_sell_price: document.getElementById('max_sell_price')?.value || '300',
-        min_sell_count: document.getElementById('min_sell_count')?.value || '20',
-        web_auth: document.getElementById('web_auth')?.checked || false
+        buff_session: document.getElementById('buff-session')?.value || '',
+        steam_cookies: document.getElementById('steam-cookies')?.value || '',
+        proxy_url: document.getElementById('proxy-url')?.value || '',
+        max_threads: document.getElementById('max-threads')?.value || '2',
+        game_type: document.querySelector('input[name="game_type"]:checked')?.value || 'CSGO',
+        min_sell_price: document.getElementById('min-sell-price')?.value || '25',
+        max_sell_price: document.getElementById('max-sell-price')?.value || '300',
+        min_sell_count: document.getElementById('min-sell-count')?.value || '20',
+        web_auth: document.getElementById('web-auth')?.checked || false
     };
 
     // 保存配置

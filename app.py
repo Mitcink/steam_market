@@ -316,8 +316,12 @@ class ScraperService:
             "sort_by": "price.asc",  # 通常需要排序
             "_": int(time.time() * 1000)  # 防止缓存
         }
-        # 如果 buff_session 存在，合并到请求中
-        cookies = {"session": self.config["buff_session"]} if self.config.get("buff_session") else {}
+        # 获取 buff_session，注意要检查是否为空字符串
+        buff_session = self.config.get("buff_session", "").strip()
+        cookies = {"session": buff_session} if buff_session else {}
+        
+        if not buff_session:
+            print("警告: buff_session 未配置或为空，可能导致 Buff API 返回'请先登录'错误")
 
         try:
             # FIX: 使用 self.session.get 而不是 requests.get，确保代理生效

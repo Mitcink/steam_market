@@ -79,6 +79,30 @@ def init_db():
     cursor.execute(
         "INSERT OR IGNORE INTO system_config (setting_key, setting_value, description) VALUES ('max_login_attempts', '5', '最大登录尝试次数')")
 
+    # 创建市场物品数据表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS market_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        buff_id INTEGER UNIQUE NOT NULL,
+        steam_market_id TEXT NOT NULL,
+        buff_buy_price REAL,
+        buff_sell_price REAL,
+        steam_sell_price REAL,
+        steam_buy_price REAL,
+        steam_sell_num INTEGER,
+        buff_sell_num INTEGER,
+        steam_volume INTEGER,
+        update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    # 创建索引以提高查询性能
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_buff_id ON market_items(buff_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_update_time ON market_items(update_time)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_kind ON market_items(kind)')
+
     conn.commit()
     conn.close()
     print("数据库初始化完成")
@@ -116,28 +140,73 @@ def admin_required(f):
     return decorated_function
 
 
-def load_data_from_file():
-    """Load crawled data from a JSON file."""
+def load_data_from_db():
+    """Load crawled data from SQLite database."""
     global crawled_data
-    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT name, kind, buff_id, steam_market_id, buff_buy_price, buff_sell_price,
+                   steam_sell_price, steam_buy_price, steam_sell_num, buff_sell_num,
+                   steam_volume, update_time
+            FROM market_items
+            ORDER BY update_time DESC
+        ''')
+        rows = cursor.fetchall()
+        crawled_data = []
+        for row in rows:
+            crawled_data.append({
+                'name': row[0],
+                'kind': row[1],
+                'buff_id': row[2],
+                'steam_market_id': row[3],
+                'buff_buy_price': row[4],
+                'buff_sell_price': row[5],
+                'steam_sell_price': row[6],
+                'steam_buy_price': row[7],
+                'steam_sell_num': row[8],
+                'buff_sell_num': row[9],
+                'steam_volume': row[10],
+                'update_time': row[11]
+            })
+        conn.close()
+        print(f"从数据库加载了 {len(crawled_data)} 条数据")
+    except Exception as e:
+        print(f"从数据库加载数据时出错: {e}")
+        crawled_data = []
 
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                crawled_data = json.load(f)
-                print(f"Loaded {len(crawled_data)} items from {DATA_FILE}")
-        except (json.JSONDecodeError, FileNotFoundError):
-            print(f"Error loading {DATA_FILE}, starting with empty data.")
-            crawled_data = []
-    else:
-        print(f"No {DATA_FILE} found, starting with empty data.")
 
-
-def save_data_to_file():
-    """Save crawled data to a JSON file."""
+def save_item_to_db(item):
+    """Save or update a single item to SQLite database."""
     with db_lock:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(crawled_data, f, ensure_ascii=False, indent=4)
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO market_items 
+                (name, kind, buff_id, steam_market_id, buff_buy_price, buff_sell_price,
+                 steam_sell_price, steam_buy_price, steam_sell_num, buff_sell_num,
+                 steam_volume, update_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                item['name'],
+                item['kind'],
+                item['buff_id'],
+                item['steam_market_id'],
+                item['buff_buy_price'],
+                item['buff_sell_price'],
+                item['steam_sell_price'],
+                item['steam_buy_price'],
+                item['steam_sell_num'],
+                item['buff_sell_num'],
+                item['steam_volume'],
+                item['update_time']
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"保存数据到数据库时出错: {e}")
 
 
 def parse_cookies_string(cookie_string):
@@ -340,7 +409,7 @@ def run_crawler(config):
     global is_crawling, crawled_data
     is_crawling = True
 
-    print(f"Starting crawler with config: {config}")
+    print(f"使用配置启动爬虫: {config}")
 
     scraper = ScraperService(config)
     page_num = 1
@@ -368,6 +437,7 @@ def run_crawler(config):
                     if processed_item and processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
                         sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)
                         if sell_ratio < 0.88:
+                            save_item_to_db(processed_item)
                             with db_lock:
                                 found = False
                                 for i, existing_item in enumerate(crawled_data):
@@ -379,8 +449,6 @@ def run_crawler(config):
                                     crawled_data.append(processed_item)
                                     if len(crawled_data) > 1000:
                                         crawled_data.pop(0)
-
-                            save_data_to_file()
 
                 sleep_time = random.uniform(2, 5)
                 if len(crawled_data) > 200:
@@ -728,13 +796,16 @@ def clear_data():
     global crawled_data
     with db_lock:
         try:
-            if os.path.exists(DATA_FILE):
-                os.remove(DATA_FILE)
-                print(f"Successfully removed {DATA_FILE}")
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM market_items')
+            conn.commit()
+            conn.close()
             crawled_data = []
+            print("成功清空数据库中的所有市场物品数据")
             return jsonify({"message": "数据已成功清空。"}), 200
-        except OSError as e:
-            print(f"Error removing file {DATA_FILE}: {e}")
+        except Exception as e:
+            print(f"清空数据库时出错: {e}")
             return jsonify({"message": f"清空数据失败: {e}"}), 500
 
 
@@ -744,7 +815,7 @@ if __name__ == '__main__':
 
     # 加载爬虫数据
     os.makedirs('data', exist_ok=True)
-    load_data_from_file()
+    load_data_from_db()
 
     # 设置安全的密钥（生产环境请使用环境变量）
     app.secret_key = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-me'

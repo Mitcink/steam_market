@@ -38,19 +38,19 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in-production'
 
-# 在应用创建时立即初始化数据库（确保无论如何启动都会执行）
-def ensure_db_initialized():
-    """确保数据库已初始化"""
-    try:
-        init_db()
-    except Exception as e:
-        print(f"数据库初始化警告: {e}")
+# 在模块加载时立即初始化数据库（确保无论如何启动都会执行）
+# 注意：init_db() 函数在后面定义，所以这个调用需要延迟到所有函数定义之后
+_db_initialized = False
 
-# 注册应用启动时的钩子
-@app.before_first_request
-def initialize_database():
-    """应用首次请求前初始化数据库"""
-    ensure_db_initialized()
+def ensure_db_initialized():
+    """确保数据库已初始化（线程安全）"""
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            init_db()
+            _db_initialized = True
+        except Exception as e:
+            print(f"数据库初始化警告: {e}")
 
 # Session 配置
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # session 有效期 24 小时
@@ -839,9 +839,10 @@ def clear_data():
             return jsonify({"message": f"清空数据失败: {e}"}), 500
 
 
-if __name__ == '__main__':
-    init_db()
+# 在模块加载时立即初始化数据库（无论如何启动都会执行）
+ensure_db_initialized()
 
+if __name__ == '__main__':
     # 加载爬虫数据
     os.makedirs('data', exist_ok=True)
     load_data_from_db()

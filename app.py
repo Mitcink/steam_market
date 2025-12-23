@@ -42,7 +42,7 @@ app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # session 有效期 24 小时
 app.config['SESSION_COOKIE_SECURE'] = False  # HTTP 环境设为 False，HTTPS 环境设为 True
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # 防止 XSS 攻击
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # 防止 CSRF 攻击，Lax 允许部分跨站请求
+app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'  # 防止 CSRF 攻击，Strict 禁止所有跨站请求
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True  # 每次请求都刷新 session 过期时间
 
 CORS(app, supports_credentials=True)
@@ -51,8 +51,10 @@ DATA_DIR = 'data'
 DB_FILE = os.path.join(DATA_DIR, 'users.db')
 
 # 全局状态控制
+crawled_data = []
 is_crawling = False
 crawler_thread = None
+db_lock = threading.Lock()
 
 
 # ===================== 数据库辅助函数 =====================
@@ -106,32 +108,32 @@ def init_db():
             )
             print("创建默认管理员用户: admin / admin123")
 
-    # 创建市场物品数据表
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS market_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        buff_id INTEGER UNIQUE NOT NULL,
-        steam_market_id TEXT NOT NULL,
-        buff_buy_price REAL,
-        buff_sell_price REAL,
-        steam_sell_price REAL,
-        steam_buy_price REAL,
-        steam_sell_num INTEGER,
-        buff_sell_num INTEGER,
-        steam_volume INTEGER,
-        update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
+        # 创建市场物品数据表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS market_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            buff_id INTEGER UNIQUE NOT NULL,
+            steam_market_id TEXT NOT NULL,
+            buff_buy_price REAL,
+            buff_sell_price REAL,
+            steam_sell_price REAL,
+            steam_buy_price REAL,
+            steam_sell_num INTEGER,
+            buff_sell_num INTEGER,
+            steam_volume INTEGER,
+            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
 
-    # 创建索引以提高查询性能
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_buff_id ON market_items(buff_id)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_update_time ON market_items(update_time)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_kind ON market_items(kind)')
+        # 创建索引以提高查询性能
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_buff_id ON market_items(buff_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_update_time ON market_items(update_time)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kind ON market_items(kind)')
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    
     print("数据库初始化完成")
 
 
@@ -208,11 +210,6 @@ def load_data_from_db():
         print(f"从数据库加载数据时出错: {e}")
         crawled_data = []
 
-    formatted_items = []
-    for item in new_items:
-        # 安全获取数值，防止 NoneType 错误
-        steam_price = item.get('steam_sell_price', 0) or 0
-        buff_price = item.get('buff_sell_price', 0) or 0
 
 def save_item_to_db(item):
     """Save or update a single item to SQLite database."""

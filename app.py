@@ -362,12 +362,11 @@ class ScraperService:
         steam_cookies = parse_cookies_string(self.config["steam_cookies"])
 
         try:
-            # FIX: 使用 self.session
             response = self.session.get(url, cookies=steam_cookies, timeout=15)
 
             if response.status_code == 429:
-                print("Steam API 请求过多 (429)，暂停 30 秒...")
-                time.sleep(30)
+                print("Steam API 请求过多 (429)，暂停 60 秒...")
+                time.sleep(60)
                 return 0
 
             response.raise_for_status()
@@ -388,8 +387,10 @@ class ScraperService:
         steam_cookies = parse_cookies_string(self.config["steam_cookies"])
 
         try:
+            # 添加延迟避免 Steam API 速率限制
+            time.sleep(random.uniform(3, 5))
+            
             # 1. 获取市场页面 HTML
-            # FIX: 使用 self.session
             response = self.session.get(market_url, cookies=steam_cookies, timeout=15)
             response.raise_for_status()
             market_html = response.text
@@ -397,7 +398,6 @@ class ScraperService:
             # 提取 Market ID
             match = re.search(r"Market_LoadOrderSpread\s*\(\s*(\d+)\s*\)", market_html)
             if not match:
-                # 尝试另一种常见的匹配格式
                 match = re.search(r"Market_LoadOrderSpread\$\s+(\d+)", market_html)
 
             if not match:
@@ -406,12 +406,15 @@ class ScraperService:
 
             market_id = match.group(1)
 
+            # 添加延迟
+            time.sleep(random.uniform(2, 4))
+            
             # 2. 获取直方图数据 (API)
             api_url = f"https://steamcommunity.com/market/itemordershistogram?country=CN&language=schinese&currency=23&item_nameid={market_id}"
             api_response = self.session.get(api_url, cookies=steam_cookies, timeout=15)
             api_response.raise_for_status()
 
-            # 检查是否返回了 HTML (通常意味着需要登录或被风控)
+            # 检查是否返回了 HTML
             if api_response.text.strip().startswith('<'):
                 print(f"Steam API 返回了 HTML 而非 JSON ({item['name']}) - 可能是 Cookie 失效")
                 return None
@@ -422,11 +425,9 @@ class ScraperService:
             sell_table = api_data.get("sell_order_table", "")
             buy_table = api_data.get("buy_order_table", "")
 
-            # 使用更健壮的正则
             sell_price_match = re.search(r"¥\s*(\d+\.\d{2})", sell_table)
             buy_price_match = re.search(r"¥\s*(\d+\.\d{2})", buy_table)
 
-            # 解析总出售数量
             sell_summary = api_data.get("sell_order_summary", "")
             sell_num_match = re.search(r">(\d+)<", sell_summary)
             if not sell_num_match:
@@ -438,7 +439,7 @@ class ScraperService:
 
             steam_volume = 0
             if appid_match and market_hash_name_match:
-                # 对 URL 编码的名称进行解码处理
+                time.sleep(random.uniform(2, 4))
                 raw_hash_name = market_hash_name_match.group(1)
                 steam_volume = self.get_steam_price_overview(appid_match.group(1), raw_hash_name)
 
@@ -525,6 +526,7 @@ def run_crawler(config):
                     sleep_time = random.uniform(5, 10)
                 time.sleep(sleep_time)
 
+            print(f"页面 {page_num} 处理完成，当前数据库共 {len(crawled_data)} 条数据")
             page_num += 1
             if page_num > total_pages:
                 print("已遍历所有页面，重新开始...")

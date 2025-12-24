@@ -487,18 +487,27 @@ def run_crawler(config):
                 if page_num > 1:
                     page_num = 1
                 continue
+            
+            print(f"页面 {page_num} 获取到 {len(items)} 个物品")
             for item in items:
                 if not is_crawling:
                     break
 
-                if item["sell_num"] >= int(config["min_sell_count"]):
+                item_name = item.get('name', '未知')
+                sell_num = item.get("sell_num", 0)
+                
+                if sell_num >= int(config["min_sell_count"]):
+                    print(f"  处理: {item_name} (销量: {sell_num})")
                     # 调用 get_steam_data 获取 Steam 市场数据
                     processed_item = scraper.get_steam_data(item)
 
-                    if processed_item and processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
-                        sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)
-                        if sell_ratio < 0.88:
-                            save_item_to_db(processed_item)
+                    if processed_item:
+                        if processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
+                            sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)
+                            print(f"    比率: {sell_ratio:.2f} (Buff:¥{processed_item['buff_sell_price']} Steam:¥{processed_item['steam_sell_price']})")
+                            if sell_ratio < 0.88:
+                                print(f"    ✓ 保存到数据库")
+                                save_item_to_db(processed_item)
                             with db_lock:
                                 found = False
                                 for i, existing_item in enumerate(crawled_data):

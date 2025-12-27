@@ -821,13 +821,44 @@ def get_status():
 @login_required
 def get_data():
     try:
-        items = db.load_items()
+        with db_lock:
+            # 从数据库读取最新数据
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT name, kind, buff_id, steam_market_id, buff_buy_price, buff_sell_price,
+                       steam_sell_price, steam_buy_price, steam_sell_num, buff_sell_num,
+                       steam_volume, update_time
+                FROM market_items
+                ORDER BY update_time DESC
+            ''')
+            rows = cursor.fetchall()
+            conn.close()
+            
+            items = []
+            for row in rows:
+                items.append({
+                    'name': row[0],
+                    'kind': row[1],
+                    'buff_id': row[2],
+                    'steam_market_id': row[3],
+                    'buff_buy_price': row[4],
+                    'buff_sell_price': row[5],
+                    'steam_sell_price': row[6],
+                    'steam_buy_price': row[7],
+                    'steam_sell_num': row[8],
+                    'buff_sell_num': row[9],
+                    'steam_volume': row[10],
+                    'update_time': row[11]
+                })
+            
         return jsonify({
             "success": True,
             "data": items,
             "count": len(items)
         })
     except Exception as e:
+        print(f"获取数据时出错: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

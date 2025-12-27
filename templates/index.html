@@ -578,15 +578,27 @@
     function getValueByKey(item, key) {
         // Handle calculated values
         if (key === 'steam_sell_ratio') {
+            // 出售价比例 = Buff出售价 / (Steam出售价 * 0.85)
+            if (!item.steam_sell_price || item.steam_sell_price <= 0) return 999999;
             const ratio = item.buff_sell_price / (item.steam_sell_price * 0.85);
-            return isNaN(ratio) || !isFinite(ratio) ? 0 : parseFloat(ratio.toFixed(2));
+            return isNaN(ratio) || !isFinite(ratio) ? 999999 : ratio;
         }
         if (key === 'steam_buy_ratio') {
-            const ratio = item.buff_buy_price / (item.steam_buy_price * 1.15);
-            return isNaN(ratio) || !isFinite(ratio) ? 0 : parseFloat(ratio.toFixed(2));
+            // 求购价比例 = Buff出售价 / (Steam求购价 * 0.85)
+            if (!item.steam_buy_price || item.steam_buy_price <= 0) return 999999;
+            const ratio = item.buff_sell_price / (item.steam_buy_price * 0.85);
+            return isNaN(ratio) || !isFinite(ratio) ? 999999 : ratio;
         }
         // Handle missing keys gracefully for sorting
-        return item[key] !== undefined && item[key] !== null ? item[key] : (key === 'name' ? '' : 0);
+        const value = item[key];
+        if (value === undefined || value === null) {
+            return key === 'name' ? '' : 0;
+        }
+        // Convert to number if it's a numeric field
+        if (typeof value === 'string' && !isNaN(value) && key !== 'name') {
+            return parseFloat(value);
+        }
+        return value;
     }
 
 // 保存配置到localStorage
@@ -924,25 +936,29 @@ function renderTable() {
 
     // 生成新的HTML内容
     const newHTML = pageData.map(item => {
-        const profit = (item.steam_sell_price * 0.85 - item.buff_sell_price).toFixed(2);
-        const profitRate = item.buff_sell_price > 0 ?
-            (((item.steam_sell_price * 0.85 - item.buff_sell_price) / item.buff_sell_price) * 100).toFixed(2) : 0;
+        // 求购价比例 = Buff出售价 / (Steam求购价 * 0.85)
+        const buyRatio = (item.steam_buy_price && item.steam_buy_price > 0) ?
+            (item.buff_sell_price / (item.steam_buy_price * 0.85) * 100).toFixed(2) : 'N/A';
+        
+        // 出售价比例 = Buff出售价 / (Steam出售价 * 0.85)
+        const sellRatio = (item.steam_sell_price && item.steam_sell_price > 0) ?
+            (item.buff_sell_price / (item.steam_sell_price * 0.85) * 100).toFixed(2) : 'N/A';
 
         return `
             <tr>
                 <td>${item.name || 'N/A'}</td>
-                <td>¥${item.buff_sell_price || 'N/A'}</td>
-                <td>¥${item.steam_sell_price || 'N/A'}</td>
-                <td>¥${profit}</td>
-                <td>${profitRate}%</td>
-                <td>${item.steam_volume || 'N/A'}</td>
-                <td>${item.buff_sell_num || 'N/A'}</td>
-                <td>${item.steam_sell_num || 'N/A'}</td>
-                <td>${item.update_time || 'N/A'}</td>
                 <td>
                     <a href="https://buff.163.com/goods/${item.buff_id}" target="_blank">Buff</a> |
                     <a href="https://steamcommunity.com/market/listings/${item.steam_market_id}" target="_blank">Steam</a>
                 </td>
+                <td>¥${item.buff_sell_price || 'N/A'}</td>
+                <td>¥${item.steam_sell_price || 'N/A'}</td>
+                <td>${buyRatio}${buyRatio !== 'N/A' ? '%' : ''}</td>
+                <td>${sellRatio}${sellRatio !== 'N/A' ? '%' : ''}</td>
+                <td>${item.buff_sell_num || 'N/A'}</td>
+                <td>${item.steam_sell_num || 'N/A'}</td>
+                <td>${item.steam_volume || 'N/A'}</td>
+                <td>${item.update_time || 'N/A'}</td>
             </tr>
         `;
     }).join('');

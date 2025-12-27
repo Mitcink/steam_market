@@ -3,54 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Steam/Buff 爬虫</title>
+    <title>Steam/Buff 数据分析平台</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: #f0f2f5;
+        * {
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             display: flex;
         }
+        
         .sidebar {
-            width: 200px;
-            background-color: #1a237e;
-            color: white;
-            padding: 20px 0;
+            width: 240px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 2px 0 20px rgba(0, 0, 0, 0.1);
             height: 100vh;
             position: fixed;
             top: 0;
             left: 0;
             display: flex;
             flex-direction: column;
-            align-items: center;
+            z-index: 1000;
         }
-        .sidebar h2 {
-            margin-top: 0;
-        }
-        .sidebar a {
-            display: block;
-            width: 100%;
-            padding: 15px 20px;
-            color: #b0b0b0;
-            text-decoration: none;
-            transition: background-color 0.3s;
-            box-sizing: border-box;
+        
+        .sidebar-header {
+            padding: 30px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
             text-align: center;
         }
-        .sidebar a:hover {
-            background-color: #3f51b5;
+        
+        .sidebar-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 5px;
         }
-        .sidebar .active {
-            background-color: #3949ab;
+        
+        .sidebar-header .user-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        
+        .sidebar-menu {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+        
+        .sidebar a {
+            display: flex;
+            align-items: center;
+            padding: 14px 24px;
+            color: #4a5568;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            font-size: 15px;
+            font-weight: 500;
+            border-left: 3px solid transparent;
+        }
+        
+        .sidebar a:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+        
+        .sidebar a.active {
+            background: rgba(102, 126, 234, 0.15);
+            color: #667eea;
+            border-left-color: #667eea;
+        }
+        
+        .sidebar a::before {
+            content: '●';
+            margin-right: 12px;
+            font-size: 8px;
+        }
+        
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        .logout-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background: #ef4444;
             color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: #dc2626;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
         .main-content {
-            margin-left: 200px;
-            width: calc(100% - 200px);
-            padding: 20px;
-            box-sizing: border-box;
-            position: relative;
+            margin-left: 240px;
+            width: calc(100% - 240px);
+            padding: 30px;
+            min-height: 100vh;
         }
         .page {
             display: none;
@@ -104,12 +172,27 @@
             margin-right: 10px;
         }
         .container {
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             padding: 30px;
             margin-bottom: 20px;
-            margin-top: 80px; /* 为固定导航栏留出空间 */
+        }
+        
+        .page-header {
+            margin-bottom: 30px;
+        }
+        
+        .page-header h1 {
+            font-size: 28px;
+            color: #1a202c;
+            margin-bottom: 8px;
+        }
+        
+        .page-header p {
+            color: #718096;
+            font-size: 14px;
         }
         .form-group {
             margin-bottom: 20px;
@@ -231,33 +314,81 @@
             gap: 5px;
             margin-top: 20px;
         }
-        .pagination button {
-            background-color: #f0f0f0;
-            color: #333;
-            border: 1px solid #ccc;
-            padding: 8px 12px;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: background-color 0.3s;
-        }
-        .pagination button:hover:not(.active) {
-            background-color: #e0e0e0;
-        }
-        .pagination button.active {
-            background-color: #007bff;
-            color: white;
-            border-color: #007bff;
-        }
-        .pagination input {
-            width: 50px;
-            text-align: center;
-        }
-        .data-stats {
-            margin-bottom: 10px;
-            color: #555;
+        
+        .pagination-info {
+            color: #718096;
             font-size: 14px;
         }
-
+        
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .pagination button {
+            min-width: 40px;
+            height: 40px;
+            padding: 0 12px;
+            border: 2px solid #e2e8f0;
+            background: white;
+            color: #4a5568;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            border-color: #667eea;
+            color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+        
+        .pagination button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: transparent;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination-jump {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .pagination-jump input {
+            width: 60px;
+            height: 40px;
+            padding: 0 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .pagination-jump input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .pagination-jump button {
+            background: #667eea;
+            color: white;
+            border-color: transparent;
+        }
+        
+        .pagination-jump button:hover {
+            background: #5568d3;
+        }
+        
         /* 响应式设计 */
         @media (max-width: 768px) {
             .navbar {
@@ -299,9 +430,20 @@
 
 
 <div class="sidebar">
-    <a href="#" data-page="overview" class="active">概览</a>
-    <a href="#" data-page="settings">设置</a>
-    <a href="#" data-page="data">数据</a>
+    <div class="sidebar-header">
+        <h2>数据分析平台</h2>
+        <div class="user-badge">{{ username }}{% if is_admin %} · 管理员{% endif %}</div>
+    </div>
+    <div class="sidebar-menu">
+        {% if is_admin %}
+        <a href="#" data-page="overview" class="active">概览</a>
+        <a href="#" data-page="settings">设置</a>
+        {% endif %}
+        <a href="#" data-page="data" {% if not is_admin %}class="active"{% endif %}>数据</a>
+    </div>
+    <div class="sidebar-footer">
+        <button class="logout-btn" onclick="logout()">退出登录</button>
+    </div>
 </div>
 
 <div class="main-content">
@@ -938,11 +1080,11 @@ function renderTable() {
     const newHTML = pageData.map(item => {
         // 求购价比例 = Buff出售价 / (Steam求购价 * 0.85)
         const buyRatio = (item.steam_buy_price && item.steam_buy_price > 0) ?
-            (item.buff_sell_price / (item.steam_buy_price * 0.85) * 100).toFixed(2) : 'N/A';
+            (item.buff_sell_price / (item.steam_buy_price * 0.85)).toFixed(2) : 'N/A';
         
         // 出售价比例 = Buff出售价 / (Steam出售价 * 0.85)
         const sellRatio = (item.steam_sell_price && item.steam_sell_price > 0) ?
-            (item.buff_sell_price / (item.steam_sell_price * 0.85) * 100).toFixed(2) : 'N/A';
+            (item.buff_sell_price / (item.steam_sell_price * 0.85)).toFixed(2) : 'N/A';
 
         return `
             <tr>
@@ -953,8 +1095,8 @@ function renderTable() {
                 </td>
                 <td>¥${item.buff_sell_price || 'N/A'}</td>
                 <td>¥${item.steam_sell_price || 'N/A'}</td>
-                <td>${buyRatio}${buyRatio !== 'N/A' ? '%' : ''}</td>
-                <td>${sellRatio}${sellRatio !== 'N/A' ? '%' : ''}</td>
+                <td>${buyRatio}</td>
+                <td>${sellRatio}</td>
                 <td>${item.buff_sell_num || 'N/A'}</td>
                 <td>${item.steam_sell_num || 'N/A'}</td>
                 <td>${item.steam_volume || 'N/A'}</td>
@@ -973,78 +1115,123 @@ function renderPagination() {
         paginationContainer.innerHTML = '';
         const totalPages = Math.ceil(allData.length / ITEMS_PER_PAGE);
 
-        if (totalPages <= 1) {
-            addPageJumpInput(totalPages);
+        if (totalPages === 0) {
             return;
         }
 
-        let pagesToShow = new Set();
-        pagesToShow.add(1);
+        // 创建分页信息
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'pagination-info';
+        infoDiv.textContent = `第 ${currentPage} / ${totalPages} 页，共 ${allData.length} 条数据`;
+        paginationContainer.appendChild(infoDiv);
 
-        if (totalPages > 10) {
-            if (currentPage > 4) {
-                pagesToShow.add('...');
-            }
-            const start = Math.max(2, currentPage - 2);
-            const end = Math.min(totalPages - 1, currentPage + 2);
-            for (let i = start; i <= end; i++) {
-                pagesToShow.add(i);
-            }
-            if (currentPage < totalPages - 3) {
-                pagesToShow.add('...');
-            }
-        } else {
-            for (let i = 1; i <= totalPages; i++) {
-                pagesToShow.add(i);
-            }
-        }
+        // 创建分页控制容器
+        const controlsDiv = document.createElement('div');
+        controlsDiv.className = 'pagination-controls';
 
-        pagesToShow.add(totalPages);
+        // 上一页按钮
+        const prevBtn = document.createElement('button');
+        prevBtn.innerHTML = '← 上一页';
+        prevBtn.disabled = currentPage === 1;
+        prevBtn.addEventListener('click', () => goToPage(currentPage - 1));
+        controlsDiv.appendChild(prevBtn);
 
-        const sortedPages = Array.from(pagesToShow).sort((a, b) => {
-            if (a === '...') return -1;
-            if (b === '...') return 1;
-            return a - b;
-        });
-
-        sortedPages.forEach(page => {
+        // 页码按钮
+        const pageNumbers = getPageNumbers(currentPage, totalPages);
+        pageNumbers.forEach(page => {
             if (page === '...') {
                 const span = document.createElement('span');
                 span.textContent = '...';
-                paginationContainer.appendChild(span);
+                span.style.padding = '0 8px';
+                span.style.color = '#718096';
+                controlsDiv.appendChild(span);
             } else {
                 const button = document.createElement('button');
                 button.textContent = page;
                 button.className = currentPage === page ? 'active' : '';
                 button.addEventListener('click', () => goToPage(page));
-                paginationContainer.appendChild(button);
+                controlsDiv.appendChild(button);
             }
         });
 
-        addPageJumpInput(totalPages);
+        // 下一页按钮
+        const nextBtn = document.createElement('button');
+        nextBtn.innerHTML = '下一页 →';
+        nextBtn.disabled = currentPage === totalPages;
+        nextBtn.addEventListener('click', () => goToPage(currentPage + 1));
+        controlsDiv.appendChild(nextBtn);
+
+        paginationContainer.appendChild(controlsDiv);
+
+        // 跳转输入框
+        if (totalPages > 1) {
+            const jumpDiv = document.createElement('div');
+            jumpDiv.className = 'pagination-jump';
+
+            const label = document.createElement('span');
+            label.textContent = '跳至';
+            label.style.color = '#718096';
+            label.style.fontSize = '14px';
+            jumpDiv.appendChild(label);
+
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = 1;
+            input.max = totalPages;
+            input.value = currentPage;
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const pageNum = parseInt(input.value);
+                    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+                        goToPage(pageNum);
+                    }
+                }
+            });
+            jumpDiv.appendChild(input);
+
+            const goBtn = document.createElement('button');
+            goBtn.textContent = '跳转';
+            goBtn.addEventListener('click', () => {
+                const pageNum = parseInt(input.value);
+                if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+                    goToPage(pageNum);
+                }
+            });
+            jumpDiv.appendChild(goBtn);
+
+            paginationContainer.appendChild(jumpDiv);
+        }
     }
 
-    function addPageJumpInput(totalPages) {
-        const span = document.createElement('span');
-        span.textContent = `共 ${totalPages} 页, 跳到`;
-        paginationContainer.appendChild(span);
-
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.min = 1;
-        input.max = totalPages;
-        input.value = currentPage;
-        paginationContainer.appendChild(input);
-
-        const button = document.createElement('button');
-        button.textContent = '确定';
-        button.addEventListener('click', () => {
-            const pageNum = parseInt(input.value);
-            if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-                goToPage(pageNum);
+    function getPageNumbers(current, total) {
+        const pages = [];
+        
+        if (total <= 7) {
+            for (let i = 1; i <= total; i++) {
+                pages.push(i);
             }
-        });
-        paginationContainer.appendChild(button);
+        } else {
+            pages.push(1);
+            
+            if (current > 3) {
+                pages.push('...');
+            }
+            
+            const start = Math.max(2, current - 1);
+            const end = Math.min(total - 1, current + 1);
+            
+            for (let i = start; i <= end; i++) {
+                pages.push(i);
+            }
+            
+            if (current < total - 2) {
+                pages.push('...');
+            }
+            
+            pages.push(total);
+        }
+        
+        return pages;
     }
 
     function goToPage(page) {
@@ -1055,8 +1242,45 @@ function renderPagination() {
         log(`已跳转到第 ${page} 页。`, 'crawler');
     }
 
-    // Initial fetch on page load
-    fetchData();
+    // 页面切换逻辑
+    const isAdmin = {% if is_admin %}true{% else %}false{% endif %};
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        // 设置默认显示页面
+        if (!isAdmin) {
+            // 普通用户只显示数据页面
+            document.getElementById('overview-page').style.display = 'none';
+            document.getElementById('settings-page').style.display = 'none';
+            document.getElementById('data-page').classList.add('active');
+            document.getElementById('data-page').style.display = 'block';
+        }
+        
+        // 侧边栏点击事件
+        document.querySelectorAll('.sidebar a').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetPage = link.getAttribute('data-page');
+                
+                // 移除所有active类
+                document.querySelectorAll('.sidebar a').forEach(l => l.classList.remove('active'));
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                
+                // 添加active类到当前选中项
+                link.classList.add('active');
+                document.getElementById(targetPage + '-page').classList.add('active');
+            });
+        });
+        
+        // 加载数据
+        fetchData();
+    });
+    
+    // 退出登录
+    function logout() {
+        if (confirm('确定要退出登录吗？')) {
+            window.location.href = '/logout';
+        }
+    }
 </script>
 
 </body>

@@ -646,17 +646,6 @@
         fetchData();
     });
 
-    document.querySelectorAll('.sidebar a').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const pageId = e.target.getAttribute('data-page');
-            document.querySelectorAll('.sidebar a').forEach(nav => nav.classList.remove('active'));
-            e.target.classList.add('active');
-            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
-            document.getElementById(`${pageId}-page`).classList.add('active');
-        });
-    });
-
     document.querySelectorAll('.data-table th').forEach(header => {
         header.addEventListener('click', () => {
             const key = header.getAttribute('data-sort-key');

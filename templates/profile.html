@@ -1,108 +1,96 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>用户资料 - 爬虫管理系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-        }
-        .profile-container {
-            max-width: 800px;
-            margin: 50px auto;
-            padding: 30px;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-        .profile-header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #eee;
-        }
-        .profile-avatar {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 40px;
-            margin: 0 auto 20px;
-        }
-        .info-item {
-            padding: 15px 0;
-            border-bottom: 1px solid #eee;
-        }
-        .info-label {
-            font-weight: 600;
-            color: #555;
-        }
-        .info-value {
-            color: #333;
-        }
-        .btn-back {
-            margin-top: 30px;
-        }
-    </style>
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-        <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">爬虫管理系统</a>
-            <div class="navbar-nav ms-auto">
-                <span class="nav-item nav-link text-white">欢迎，{{ username }}</span>
-                <a class="nav-item nav-link" href="{{ url_for('index') }}">控制台</a>
-                <a class="nav-item nav-link" href="{{ url_for('logout') }}">退出</a>
-            </div>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <div class="profile-container">
-        <div class="profile-header">
-            <div class="profile-avatar">
-                {{ username[0].upper() }}
-            </div>
-            <h3>{{ username }}</h3>
-            <p class="text-muted">用户信息</p>
+{% block title %}个人资料 | Steam Market Control{% endblock %}
+
+{% block body %}
+<main class="app-shell profile-page">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="eyebrow">Profile</div>
+            <h1>账户中心</h1>
+            <p>查看当前账户状态，并快速回到主控制台继续操作。</p>
         </div>
 
-        <div class="profile-info">
-            <div class="row info-item">
-                <div class="col-md-3 info-label">用户名</div>
-                <div class="col-md-9 info-value">{{ username }}</div>
-            </div>
+        <div class="profile-chip">
+            <strong>{{ username }}</strong>
+            <span>{% if is_admin %}管理员{% else %}普通用户{% endif %}</span>
+        </div>
 
-            <div class="row info-item">
-                <div class="col-md-3 info-label">账户创建时间</div>
-                <div class="col-md-9 info-value">{{ created_at }}</div>
-            </div>
+        <nav class="side-nav">
+            <a class="side-link" href="{{ url_for('index') }}">
+                <span>控制台</span>
+                <small>Back</small>
+            </a>
+            {% if is_admin %}
+            <a class="side-link" href="{{ url_for('admin_users') }}">
+                <span>用户管理</span>
+                <small>Admin</small>
+            </a>
+            {% endif %}
+            <a class="side-link is-active" href="{{ url_for('profile') }}">
+                <span>个人资料</span>
+                <small>Live</small>
+            </a>
+        </nav>
 
-            <div class="row info-item">
-                <div class="col-md-3 info-label">用户类型</div>
-                <div class="col-md-9 info-value">
-                    {% if username == 'admin' %}
-                    <span class="badge bg-danger">管理员</span>
-                    {% else %}
-                    <span class="badge bg-success">普通用户</span>
-                    {% endif %}
+        <div class="sidebar-footer">
+            <button class="btn btn-danger" type="button" data-logout>退出登录</button>
+        </div>
+    </aside>
+
+    <section class="content-shell">
+        <header class="topbar">
+            <div class="page-copy">
+                <h2>账户资料</h2>
+                <p>这部分信息直接来自当前用户表记录，便于确认权限身份与创建时间。</p>
+            </div>
+            <div class="topbar-actions">
+                <a class="btn btn-primary" href="{{ url_for('index') }}">返回工作台</a>
+            </div>
+        </header>
+
+        <article class="card">
+            <div class="card-body">
+                <div class="profile-hero">
+                    <div class="profile-avatar-lg">{{ username[0].upper() }}</div>
+                    <div class="stack">
+                        <div>
+                            <div class="eyebrow">{% if is_admin %}Administrator{% else %}Member{% endif %}</div>
+                            <h3 class="card-title" style="font-size:34px; margin-top:12px;">{{ username }}</h3>
+                            <p class="card-subtitle">当前账户已接入新版仪表盘外观，侧边导航与控制台保持同一套设计语言。</p>
+                        </div>
+                        <div class="info-grid">
+                            <div class="info-card">
+                                <strong>用户名</strong>
+                                <span>{{ username }}</span>
+                            </div>
+                            <div class="info-card">
+                                <strong>账户角色</strong>
+                                <span>{% if is_admin %}管理员{% else %}普通用户{% endif %}</span>
+                            </div>
+                            <div class="info-card">
+                                <strong>创建时间</strong>
+                                <span>{{ created_at }}</span>
+                            </div>
+                            <div class="info-card">
+                                <strong>会话状态</strong>
+                                <span>已登录</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </article>
+    </section>
+</main>
 
-        <div class="text-center">
-            <a href="{{ url_for('index') }}" class="btn btn-primary btn-back">
-                <i class="fas fa-arrow-left"></i> 返回控制台
-            </a>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://kit.fontawesome.com/your-fontawesome-kit.js" crossorigin="anonymous"></script>
-</body>
-</html>
+<script>
+document.querySelectorAll('[data-logout]').forEach((button) => {
+    button.addEventListener('click', () => {
+        if (window.confirm('确定要退出登录吗？')) {
+            window.location.href = '/logout';
+        }
+    });
+});
+</script>
+{% endblock %}

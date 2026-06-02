@@ -443,11 +443,14 @@ class ScraperService:
                 raw_hash_name = market_hash_name_match.group(1)
                 steam_volume = self.get_steam_price_overview(appid_match.group(1), raw_hash_name)
 
+            market_path_match = re.search(r'listings/(\d+/.+)$', market_url)
+            steam_market_id = market_path_match.group(1) if market_path_match else market_url.split('/')[-1]
+
             return {
                 "name": item["name"],
                 "kind": item["game"],
                 "buff_id": item["id"],
-                "steam_market_id": market_url.split('/')[-1],
+                "steam_market_id": steam_market_id,
                 "buff_buy_price": float(item["buy_max_price"]),
                 "buff_sell_price": float(item["sell_min_price"]),
                 "steam_sell_price": float(sell_price_match.group(1)) if sell_price_match else 0,
@@ -652,7 +655,7 @@ def profile():
     return render_template('profile.html',
                            username=user[0],
                            created_at=user[1],
-                           is_admin=user[2])
+                           is_admin=bool(user[2]))
 
 
 # ===================== 管理员路由 =====================
@@ -665,7 +668,23 @@ def admin_users():
         cursor = conn.cursor()
         cursor.execute("SELECT id, username, created_at, is_admin, is_active FROM users ORDER BY created_at DESC")
         users = cursor.fetchall()
-    return render_template('admin_users.html', users=users)
+
+    users_json = [
+        {
+            "id": user[0],
+            "username": user[1],
+            "created_at": user[2],
+            "is_admin": bool(user[3]),
+            "is_active": bool(user[4]),
+        }
+        for user in users
+    ]
+
+    return render_template(
+        'admin_users.html',
+        users_json=users_json,
+        current_user_id=session['user_id']
+    )
 
 
 @app.route('/api/admin/add_user', methods=['POST'])

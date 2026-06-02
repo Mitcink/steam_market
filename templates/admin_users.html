@@ -1,415 +1,187 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>用户管理 - 爬虫管理系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .sidebar {
-            background-color: #2c3e50;
-            color: white;
-            min-height: 100vh;
-            padding: 0;
-        }
-        .sidebar-header {
-            padding: 20px;
-            background-color: #1a252f;
-        }
-        .sidebar-menu {
-            padding: 20px 0;
-        }
-        .sidebar-menu a {
-            color: #bdc3c7;
-            text-decoration: none;
-            display: block;
-            padding: 12px 20px;
-            transition: all 0.3s;
-        }
-        .sidebar-menu a:hover {
-            color: white;
-            background-color: #34495e;
-        }
-        .sidebar-menu a.active {
-            color: white;
-            background-color: #3498db;
-        }
-        .main-content {
-            padding: 20px;
-        }
-        .card {
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            border: none;
-            margin-bottom: 20px;
-        }
-        .card-header {
-            background-color: white;
-            border-bottom: 1px solid #eee;
-            font-weight: 600;
-            font-size: 1.1rem;
-        }
-        .badge-admin {
-            background-color: #dc3545;
-        }
-        .badge-user {
-            background-color: #28a745;
-        }
-        .badge-inactive {
-            background-color: #6c757d;
-        }
-        .table th {
-            border-top: none;
-            font-weight: 600;
-            color: #495057;
-            border-bottom: 2px solid #dee2e6;
-        }
-        .table td {
-            vertical-align: middle;
-        }
-        .btn-add-user {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            color: white;
-            font-weight: 600;
-        }
-        .btn-add-user:hover {
-            opacity: 0.9;
-            color: white;
-        }
-        .modal-content {
-            border-radius: 10px;
-            border: none;
-        }
-        .form-check-input:checked {
-            background-color: #667eea;
-            border-color: #667eea;
-        }
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 60px;
-            height: 34px;
-        }
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 26px;
-            width: 26px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        input:checked + .slider {
-            background-color: #28a745;
-        }
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-    </style>
-</head>
-<body>
-    <div class="container-fluid">
-        <div class="row">
-            <!-- 侧边栏 -->
-            <div class="col-md-2 sidebar">
-                <div class="sidebar-header">
-                    <h4><i class="bi bi-shield-lock"></i> 管理后台</h4>
+{% extends "base.html" %}
+
+{% block title %}用户管理 | Steam Market Control{% endblock %}
+
+{% block body %}
+<main class="app-shell" data-admin-users-root data-users="{{ users_json|tojson|forceescape }}" data-current-user-id="{{ current_user_id }}">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="eyebrow">Admin Desk</div>
+            <h1>用户管理</h1>
+            <p>管理账号、角色和启用状态，保持工作台访问控制在同一个界面内完成。</p>
+        </div>
+
+        <div class="profile-chip">
+            <strong>管理员视图</strong>
+            <span>可创建、编辑、禁用、删除用户</span>
+        </div>
+
+        <nav class="side-nav">
+            <a class="side-link" href="{{ url_for('index') }}">
+                <span>控制台</span>
+                <small>Data</small>
+            </a>
+            <a class="side-link is-active" href="{{ url_for('admin_users') }}">
+                <span>用户管理</span>
+                <small>Admin</small>
+            </a>
+            <a class="side-link" href="{{ url_for('profile') }}">
+                <span>个人资料</span>
+                <small>Account</small>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <button class="btn btn-danger" type="button" data-logout>退出登录</button>
+        </div>
+    </aside>
+
+    <section class="content-shell">
+        <header class="topbar">
+            <div class="page-copy">
+                <h2>用户管理台</h2>
+                <p>摆脱旧版表格页和 jQuery 弹窗，改为统一风格的管理视图与原生交互。</p>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-primary" type="button" id="open-add-user-modal">添加用户</button>
+            </div>
+        </header>
+
+        <section class="kpi-grid">
+            <article class="card kpi-card">
+                <div class="card-body">
+                    <div class="kpi-label">总用户数</div>
+                    <div class="kpi-value" id="user-count">0</div>
+                    <p class="kpi-note">当前系统已注册账号总数。</p>
                 </div>
-                <div class="sidebar-menu">
-                    <a href="{{ url_for('index') }}"><i class="bi bi-speedometer2"></i> 控制台</a>
-                    <a href="{{ url_for('admin_users') }}" class="active"><i class="bi bi-people"></i> 用户管理</a>
-                    <a href="{{ url_for('profile') }}"><i class="bi bi-person-circle"></i> 个人资料</a>
-                    <a href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right"></i> 退出登录</a>
+            </article>
+            <article class="card kpi-card">
+                <div class="card-body">
+                    <div class="kpi-label">启用账户</div>
+                    <div class="kpi-value" id="active-count">0</div>
+                    <p class="kpi-note">仍然可以正常登录的账户数。</p>
+                </div>
+            </article>
+            <article class="card kpi-card">
+                <div class="card-body">
+                    <div class="kpi-label">管理员</div>
+                    <div class="kpi-value" id="admin-count">0</div>
+                    <p class="kpi-note">具备后台权限的账户数。</p>
+                </div>
+            </article>
+            <article class="card kpi-card">
+                <div class="card-body">
+                    <div class="kpi-label">管理模式</div>
+                    <div class="kpi-value">Live</div>
+                    <p class="kpi-note">所有操作直接调用现有 Flask API。</p>
+                </div>
+            </article>
+        </section>
+
+        <article class="card">
+            <div class="card-header">
+                <div>
+                    <h3 class="card-title">用户列表</h3>
+                    <p class="card-subtitle">当前页面不再整页刷新，增删改后直接更新前端状态。</p>
                 </div>
             </div>
+            <div class="card-body">
+                <div class="user-grid" id="user-rows"></div>
+            </div>
+        </article>
+    </section>
+</main>
 
-            <!-- 主内容区 -->
-            <div class="col-md-10 main-content">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h3><i class="bi bi-people"></i> 用户管理</h3>
-                    <button class="btn btn-add-user" data-bs-toggle="modal" data-bs-target="#addUserModal">
-                        <i class="bi bi-plus-circle"></i> 添加用户
-                    </button>
+<section class="modal" id="add-user-modal" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+        <div class="modal-head">
+            <h3 class="modal-title">添加新用户</h3>
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="alert alert-danger" id="add-user-error" hidden></div>
+            <form id="add-user-form" class="form-stack">
+                <div class="field">
+                    <label for="add-username">用户名</label>
+                    <input class="input" id="add-username" type="text" autocomplete="off">
                 </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-list-ul"></i> 用户列表
+                <div class="field">
+                    <label for="add-password">密码</label>
+                    <input class="input" id="add-password" type="password">
+                </div>
+                <div class="field">
+                    <label for="add-confirm-password">确认密码</label>
+                    <input class="input" id="add-confirm-password" type="password">
+                </div>
+                <div class="checkbox-card">
+                    <div class="copy">
+                        <strong>授予管理员权限</strong>
+                        <span>开启后，该账户可以访问设置页与用户管理页。</span>
                     </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>用户名</th>
-                                        <th>创建时间</th>
-                                        <th>角色</th>
-                                        <th>状态</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="usersTableBody">
-                                    {% for user in users %}
-                                    <tr data-user-id="{{ user[0] }}">
-                                        <td>{{ user[0] }}</td>
-                                        <td>{{ user[1] }}</td>
-                                        <td>{{ user[2] }}</td>
-                                        <td>
-                                            {% if user[3] %}
-                                            <span class="badge badge-admin">管理员</span>
-                                            {% else %}
-                                            <span class="badge badge-user">普通用户</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if user[4] %}
-                                            <span class="badge bg-success">启用</span>
-                                            {% else %}
-                                            <span class="badge bg-secondary">禁用</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <button class="btn btn-sm btn-outline-primary edit-user-btn"
-                                                    data-bs-toggle="modal"
-                                                    data-bs-target="#editUserModal"
-                                                    data-user-id="{{ user[0] }}"
-                                                    data-username="{{ user[1] }}"
-                                                    data-is-admin="{{ user[3] }}"
-                                                    data-is-active="{{ user[4] }}">
-                                                <i class="bi bi-pencil"></i> 编辑
-                                            </button>
-                                            {% if user[0] != session.user_id %}
-                                            <button class="btn btn-sm btn-outline-danger delete-user-btn"
-                                                    data-user-id="{{ user[0] }}"
-                                                    data-username="{{ user[1] }}">
-                                                <i class="bi bi-trash"></i> 删除
-                                            </button>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
+                    <label class="switch" for="add-is-admin">
+                        <input id="add-is-admin" type="checkbox">
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+            </form>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost" type="button" data-close-modal>取消</button>
+            <button class="btn btn-primary" type="button" id="submit-add-user">创建用户</button>
+        </div>
+    </div>
+</section>
+
+<section class="modal" id="edit-user-modal" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+        <div class="modal-head">
+            <h3 class="modal-title">编辑用户</h3>
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="alert alert-danger" id="edit-user-error" hidden></div>
+            <form id="edit-user-form" class="form-stack">
+                <input type="hidden" id="edit-user-id">
+                <div class="field">
+                    <label for="edit-username">用户名</label>
+                    <input class="input" id="edit-username" type="text" disabled>
+                </div>
+                <div class="field">
+                    <label for="edit-password">新密码</label>
+                    <input class="input" id="edit-password" type="password" placeholder="留空则不修改">
+                </div>
+                <div class="checkbox-card">
+                    <div class="copy">
+                        <strong>管理员权限</strong>
+                        <span>当前用户不能移除自己的管理员权限。</span>
                     </div>
+                    <label class="switch" for="edit-is-admin">
+                        <input id="edit-is-admin" type="checkbox">
+                        <span class="switch-track"></span>
+                    </label>
                 </div>
-            </div>
+                <div class="checkbox-card">
+                    <div class="copy">
+                        <strong>账户启用状态</strong>
+                        <span>关闭后，该用户无法继续登录系统。</span>
+                    </div>
+                    <label class="switch" for="edit-is-active">
+                        <input id="edit-is-active" type="checkbox">
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+            </form>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost" type="button" data-close-modal>取消</button>
+            <button class="btn btn-primary" type="button" id="submit-edit-user">保存更改</button>
         </div>
     </div>
+</section>
+{% endblock %}
 
-    <!-- 添加用户模态框 -->
-    <div class="modal fade" id="addUserModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-person-plus"></i> 添加新用户</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="addUserForm">
-                        <div class="mb-3">
-                            <label for="username" class="form-label">用户名</label>
-                            <input type="text" class="form-control" id="username" name="username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="password" class="form-label">密码</label>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="confirmPassword" class="form-label">确认密码</label>
-                            <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required>
-                        </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="isAdmin" name="isAdmin">
-                            <label class="form-check-label" for="isAdmin">设为管理员</label>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-add-user" id="submitAddUser">添加用户</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 编辑用户模态框 -->
-    <div class="modal fade" id="editUserModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-person-gear"></i> 编辑用户</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="editUserForm">
-                        <input type="hidden" id="editUserId">
-                        <div class="mb-3">
-                            <label class="form-label">用户名</label>
-                            <input type="text" class="form-control" id="editUsername" disabled>
-                        </div>
-                        <div class="mb-3">
-                            <label for="editPassword" class="form-label">新密码（留空则不修改）</label>
-                            <input type="password" class="form-control" id="editPassword" name="password">
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">管理员权限</label>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="editIsAdmin">
-                                    <label class="form-check-label" for="editIsAdmin">管理员</label>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">账户状态</label>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="editIsActive">
-                                    <label class="form-check-label" for="editIsActive">启用</label>
-                                </div>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-primary" id="submitEditUser">保存更改</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script>
-        $(document).ready(function() {
-            // 添加用户
-            $('#submitAddUser').click(function() {
-                const username = $('#username').val();
-                const password = $('#password').val();
-                const confirmPassword = $('#confirmPassword').val();
-                const isAdmin = $('#isAdmin').is(':checked');
-
-                if (password !== confirmPassword) {
-                    alert('两次输入的密码不一致');
-                    return;
-                }
-
-                if (password.length < 6) {
-                    alert('密码长度至少6位');
-                    return;
-                }
-
-                $.ajax({
-                    url: '/api/admin/add_user',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({
-                        username: username,
-                        password: password,
-                        is_admin: isAdmin
-                    }),
-                    success: function(response) {
-                        $('#addUserModal').modal('hide');
-                        $('#addUserForm')[0].reset();
-                        location.reload();
-                    },
-                    error: function(xhr) {
-                        const error = xhr.responseJSON.error;
-                        alert('添加用户失败: ' + error);
-                    }
-                });
-            });
-
-            // 编辑用户 - 打开模态框
-            $('.edit-user-btn').click(function() {
-                const userId = $(this).data('user-id');
-                const username = $(this).data('username');
-                const isAdmin = $(this).data('is-admin') == '1';
-                const isActive = $(this).data('is-active') == '1';
-
-                $('#editUserId').val(userId);
-                $('#editUsername').val(username);
-                $('#editIsAdmin').prop('checked', isAdmin);
-                $('#editIsActive').prop('checked', isActive);
-            });
-
-            // 编辑用户 - 保存更改
-            $('#submitEditUser').click(function() {
-                const userId = $('#editUserId').val();
-                const password = $('#editPassword').val();
-                const isAdmin = $('#editIsAdmin').is(':checked');
-                const isActive = $('#editIsActive').is(':checked');
-
-                const data = {
-                    is_admin: isAdmin,
-                    is_active: isActive
-                };
-
-                if (password) {
-                    data.password = password;
-                }
-
-                $.ajax({
-                    url: '/api/admin/update_user/' + userId,
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify(data),
-                    success: function(response) {
-                        $('#editUserModal').modal('hide');
-                        location.reload();
-                    },
-                    error: function(xhr) {
-                        const error = xhr.responseJSON.error;
-                        alert('更新用户失败: ' + error);
-                    }
-                });
-            });
-
-            // 删除用户
-            $('.delete-user-btn').click(function() {
-                const userId = $(this).data('user-id');
-                const username = $(this).data('username');
-
-                if (confirm(`确定要删除用户 "${username}" 吗？此操作不可撤销。`)) {
-                    $.ajax({
-                        url: '/api/admin/delete_user/' + userId,
-                        method: 'DELETE',
-                        success: function() {
-                            location.reload();
-                        },
-                        error: function(xhr) {
-                            const error = xhr.responseJSON.error;
-                            alert('删除用户失败: ' + error);
-                        }
-                    });
-                }
-            });
-        });
-    </script>
-</body>
-</html>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin-users.js') }}"></script>
+{% endblock %}

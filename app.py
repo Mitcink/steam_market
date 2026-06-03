@@ -14,6 +14,7 @@ from functools import wraps
 from contextlib import contextmanager
 import urllib3
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 # 假设 database.py 存在并处理 items 表
 try:
@@ -337,6 +338,49 @@ def parse_cookies_string(cookie_string):
     return cookies
 
 
+def parse_steam_price_text(raw_value):
+    """把 Steam 返回的价格字符串安全转成浮点数。"""
+    if raw_value in (None, ""):
+        return 0.0
+
+    text = str(raw_value).strip()
+    cleaned = re.sub(r"[^\d,.\-]", "", text)
+    if not cleaned:
+        return 0.0
+
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+        cleaned = cleaned.replace(",", ".")
+
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def extract_steam_market_ref(market_url):
+    """从 Steam 市场链接中提取 appid、market_hash_name 和 listings 路径。"""
+    if not market_url:
+        return None
+
+    parsed = urlparse(market_url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 4 or parts[0] != "market" or parts[1] != "listings":
+        return None
+
+    appid = parts[2]
+    market_hash_name = unquote("/".join(parts[3:]))
+    return {
+        "appid": appid,
+        "market_hash_name": market_hash_name,
+        "steam_market_id": f"{appid}/{market_hash_name}",
+    }
+
+
 # ===================== 爬虫服务类 =====================
 
 class ScraperService:
@@ -441,11 +485,21 @@ class ScraperService:
             data = response.json()
 
             if data.get('success'):
-                volume_str = str(data.get('volume', '0')).replace(',', '')
-                return int(volume_str) if volume_str.isdigit() else 0
+                volume_str = re.sub(r"[^\d]", "", str(data.get('volume', '0')))
+                return {
+                    "success": True,
+                    "volume": int(volume_str) if volume_str else 0,
+                    "lowest_price": parse_steam_price_text(data.get("lowest_price")),
+                    "median_price": parse_steam_price_text(data.get("median_price")),
+                }
         except Exception as e:
             print(f"获取 Steam 销量失败 ({market_hash_name}): {e}")
-        return 0
+        return {
+            "success": False,
+            "volume": 0,
+            "lowest_price": 0.0,
+            "median_price": 0.0,
+        }
 
     def get_steam_data(self, item):
         market_url = item.get("steam_market_url")
@@ -453,77 +507,62 @@ class ScraperService:
             return None
 
         steam_cookies = parse_cookies_string(self.config["steam_cookies"])
+        market_ref = extract_steam_market_ref(market_url)
+        if not market_ref:
+            print(f"无法解析 Steam 市场链接: {item['name']} -> {market_url}")
+            return None
 
         try:
-            # 添加延迟避免 Steam API 速率限制
-            time.sleep(random.uniform(3, 5))
-            
-            # 1. 获取市场页面 HTML
+            time.sleep(random.uniform(2, 4))
+            overview = self.get_steam_price_overview(market_ref["appid"], market_ref["market_hash_name"])
+            steam_sell_price = overview["lowest_price"] or overview["median_price"]
+            steam_volume = overview["volume"]
+            steam_sell_num = 0
+            steam_buy_price = 0.0
+
+            time.sleep(random.uniform(2, 4))
             response = self.session.get(market_url, cookies=steam_cookies, timeout=15)
             response.raise_for_status()
             market_html = response.text
 
-            # 提取 Market ID
-            match = re.search(r"Market_LoadOrderSpread\s*\(\s*(\d+)\s*\)", market_html)
-            if not match:
-                match = re.search(r"Market_LoadOrderSpread\$\s+(\d+)", market_html)
+            sell_num_patterns = [
+                r'"sell_order_count"\s*:\s*"?(\\?[\d,]+)"?',
+                r'"sell_listing_count"\s*:\s*"?(\\?[\d,]+)"?',
+                r'"quantity"\s*:\s*"?(\\?[\d,]+)"?',
+            ]
+            for pattern in sell_num_patterns:
+                sell_num_match = re.search(pattern, market_html)
+                if sell_num_match:
+                    raw_sell_num = re.sub(r"[^\d]", "", sell_num_match.group(1))
+                    if raw_sell_num:
+                        steam_sell_num = int(raw_sell_num)
+                        break
 
-            if not match:
-                print(f"无法找到 Market ID: {item['name']}")
+            buy_price_patterns = [
+                r'"highest_buy_order"\s*:\s*"?(\\?[\d,.]+)"?',
+                r'"buy_order_price"\s*:\s*"?(\\?[\d,.]+)"?',
+            ]
+            for pattern in buy_price_patterns:
+                buy_price_match = re.search(pattern, market_html)
+                if buy_price_match:
+                    steam_buy_price = parse_steam_price_text(buy_price_match.group(1))
+                    if steam_buy_price > 0:
+                        break
+
+            if steam_sell_price <= 0:
+                print(f"Steam 价格为空，跳过: {item['name']}")
                 return None
-
-            market_id = match.group(1)
-
-            # 添加延迟
-            time.sleep(random.uniform(2, 4))
-            
-            # 2. 获取直方图数据 (API)
-            api_url = f"https://steamcommunity.com/market/itemordershistogram?country=CN&language=schinese&currency=23&item_nameid={market_id}"
-            api_response = self.session.get(api_url, cookies=steam_cookies, timeout=15)
-            api_response.raise_for_status()
-
-            # 检查是否返回了 HTML
-            if api_response.text.strip().startswith('<'):
-                print(f"Steam API 返回了 HTML 而非 JSON ({item['name']}) - 可能是 Cookie 失效")
-                return None
-
-            api_data = api_response.json()
-
-            # 解析数据
-            sell_table = api_data.get("sell_order_table", "")
-            buy_table = api_data.get("buy_order_table", "")
-
-            sell_price_match = re.search(r"¥\s*(\d+\.\d{2})", sell_table)
-            buy_price_match = re.search(r"¥\s*(\d+\.\d{2})", buy_table)
-
-            sell_summary = api_data.get("sell_order_summary", "")
-            sell_num_match = re.search(r">(\d+)<", sell_summary)
-            if not sell_num_match:
-                sell_num_match = re.search(r"(\d+)", sell_summary)
-
-            # 3. 提取 AppID 和 HashName 以获取销量
-            appid_match = re.search(r'listings/(\d+)/', market_url)
-            market_hash_name_match = re.search(r'listings/\d+/(.*)', market_url)
-
-            steam_volume = 0
-            if appid_match and market_hash_name_match:
-                time.sleep(random.uniform(2, 4))
-                raw_hash_name = market_hash_name_match.group(1)
-                steam_volume = self.get_steam_price_overview(appid_match.group(1), raw_hash_name)
-
-            market_path_match = re.search(r'listings/(\d+/.+)$', market_url)
-            steam_market_id = market_path_match.group(1) if market_path_match else market_url.split('/')[-1]
 
             return {
                 "name": item["name"],
                 "kind": item["game"],
                 "buff_id": item["id"],
-                "steam_market_id": steam_market_id,
+                "steam_market_id": market_ref["steam_market_id"],
                 "buff_buy_price": float(item["buy_max_price"]),
                 "buff_sell_price": float(item["sell_min_price"]),
-                "steam_sell_price": float(sell_price_match.group(1)) if sell_price_match else 0,
-                "steam_buy_price": float(buy_price_match.group(1)) if buy_price_match else 0,
-                "steam_sell_num": int(sell_num_match.group(1)) if sell_num_match else 0,
+                "steam_sell_price": steam_sell_price,
+                "steam_buy_price": steam_buy_price,
+                "steam_sell_num": steam_sell_num,
                 "buff_sell_num": item["sell_num"],
                 "steam_volume": steam_volume,
                 "update_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')

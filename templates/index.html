@@ -8,7 +8,7 @@
         <div class="brand">
             <div class="eyebrow">Steam Market Desk</div>
             <h1>行情工作台</h1>
-            <p>用更专业的布局整理抓取配置、监控状态和机会数据，减少频繁切换与视觉噪音。</p>
+            <p>把抓取配置、状态和市场数据放进更清晰的工作流里，减少切页和重复操作。</p>
         </div>
 
         <div class="profile-chip">
@@ -18,16 +18,16 @@
 
         <nav class="side-nav">
             {% if is_admin %}
-            <a class="side-link is-active" href="#" data-page-target="overview">
+            <a class="side-link is-active" href="#overview" data-page-target="overview">
                 <span>概览</span>
                 <small>Pulse</small>
             </a>
-            <a class="side-link" href="#" data-page-target="settings">
+            <a class="side-link" href="#settings" data-page-target="settings">
                 <span>配置</span>
                 <small>Ops</small>
             </a>
             {% endif %}
-            <a class="side-link {% if not is_admin %}is-active{% endif %}" href="#" data-page-target="data">
+            <a class="side-link {% if not is_admin %}is-active{% endif %}" href="#data" data-page-target="data">
                 <span>市场数据</span>
                 <small>Live</small>
             </a>
@@ -62,7 +62,7 @@
         </header>
 
         {% if is_admin %}
-        <section class="dashboard-grid" data-page="overview">
+        <section class="dashboard-grid" data-page="overview" id="overview">
             <div class="kpi-grid">
                 <article class="card kpi-card">
                     <div class="card-body">
@@ -89,7 +89,7 @@
                     <div class="card-body">
                         <div class="kpi-label">价格窗口</div>
                         <div class="kpi-value" style="font-size:28px;" id="price-window">¥25 - ¥300</div>
-                        <p class="kpi-note">来源于本地保存的当前抓取配置。</p>
+                        <p class="kpi-note">来源于当前抓取配置。</p>
                     </div>
                 </article>
             </div>
@@ -107,7 +107,7 @@
                         <div class="field">
                             <label for="proxy-url">代理地址</label>
                             <input class="input" type="text" id="proxy-url" value="https://store.steampowered.com/" placeholder="http://127.0.0.1:7890">
-                            <span class="field-hint">支持直接填写 HTTP/HTTPS/SOCKS5 地址。不建议使用站点 URL 充当代理。</span>
+                            <span class="field-hint">支持 HTTP / HTTPS / SOCKS5 地址。不要把站点 URL 当作代理填入。</span>
                         </div>
                         <div class="terminal" id="test-log-box">
                             <p class="log-info">等待连通性检测。</p>
@@ -139,7 +139,7 @@
                         <div class="card-header">
                             <div>
                                 <h3 class="card-title">当前筛选状态</h3>
-                                <p class="card-subtitle">数据区的筛选条件会同步影响统计概览。</p>
+                                <p class="card-subtitle">筛选与排序现在共享同一份前端状态，不会再互相覆盖。</p>
                             </div>
                         </div>
                         <div class="card-body">
@@ -150,7 +150,7 @@
             </div>
         </section>
 
-        <section class="dashboard-grid" data-page="settings" hidden>
+        <section class="dashboard-grid" data-page="settings" id="settings" hidden>
             <article class="card">
                 <div class="card-header">
                     <div>
@@ -160,14 +160,14 @@
                     <button class="btn btn-secondary" type="button" id="save-config-btn">立即保存</button>
                 </div>
                 <div class="card-body section">
-                    <div class="form-grid">
+                    <div class="form-grid form-grid-compact">
                         <div class="field">
                             <label for="max-threads">最大线程数</label>
                             <input class="input" type="number" id="max-threads" min="1" value="2">
                         </div>
                         <div class="field">
                             <label>游戏类型</label>
-                            <div class="segmented">
+                            <div class="segmented segmented-compact">
                                 <label>
                                     <input type="radio" name="game_type" value="CSGO" checked>
                                     <span>CSGO</span>
@@ -190,13 +190,39 @@
                             <label for="max-sell-price">BUFF 最高售价</label>
                             <input class="input" type="number" id="max-sell-price" min="0" value="300">
                         </div>
-                        <div class="field full">
-                            <label for="buff-session">BUFF Session</label>
-                            <textarea class="textarea" id="buff-session" placeholder="粘贴 session"></textarea>
+                    </div>
+
+                    <div class="token-grid">
+                        <div class="card token-card">
+                            <div class="card-body stack">
+                                <div>
+                                    <h4 class="card-title">BUFF Session</h4>
+                                    <p class="card-subtitle">浏览器无法直接读取第三方站点的受保护 Cookie，这里提供一键跳转和填写入口。</p>
+                                </div>
+                                <div class="inline-actions">
+                                    <button class="btn btn-secondary" type="button" data-open-external="https://buff.163.com">打开 Buff</button>
+                                    <button class="btn btn-ghost" type="button" data-copy-guide="buff">查看获取说明</button>
+                                </div>
+                                <div class="field">
+                                    <textarea class="textarea" id="buff-session" placeholder="在 Buff 登录后，将 session 值粘贴到这里"></textarea>
+                                </div>
+                            </div>
                         </div>
-                        <div class="field full">
-                            <label for="steam-cookies">Steam Cookies</label>
-                            <textarea class="textarea" id="steam-cookies" placeholder="粘贴 Cookie 字符串"></textarea>
+
+                        <div class="card token-card">
+                            <div class="card-body stack">
+                                <div>
+                                    <h4 class="card-title">Steam Cookies</h4>
+                                    <p class="card-subtitle">同样受浏览器同源与 HttpOnly 限制，这里提供一键打开 Steam 与复制说明。</p>
+                                </div>
+                                <div class="inline-actions">
+                                    <button class="btn btn-secondary" type="button" data-open-external="https://steamcommunity.com/market/">打开 Steam 市场</button>
+                                    <button class="btn btn-ghost" type="button" data-copy-guide="steam">查看获取说明</button>
+                                </div>
+                                <div class="field">
+                                    <textarea class="textarea" id="steam-cookies" placeholder="登录 Steam 后，将需要的 Cookie 字符串粘贴到这里"></textarea>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -215,13 +241,13 @@
         </section>
         {% endif %}
 
-        <section class="dashboard-grid" data-page="data" {% if is_admin %}hidden{% endif %}>
+        <section class="dashboard-grid" data-page="data" id="data" {% if is_admin %}hidden{% endif %}>
             <article class="card">
                 <div class="card-body">
                     <div class="toolbar">
                         <div class="toolbar-copy">
                             <h3>市场数据面板</h3>
-                            <p>表格、筛选、分页和机会比率显示已经统一到新的数据工作流。</p>
+                            <p>筛选、排序、分页共享同一份结果集，排序不会再把筛选状态冲掉。</p>
                         </div>
                         <div class="toolbar-actions">
                             <span class="inline-stat">当前页 <strong id="current-page-items">0</strong> 条</span>
@@ -235,62 +261,96 @@
                     <section class="filters">
                         <div class="filters-top">
                             <div>
-                                <h4>高级筛选</h4>
-                                <p>支持名称、价格区间、价差比例和成交量筛选。</p>
+                                <h4>即时筛选</h4>
+                                <p>填写任意条件后立即生效。范围类条件支持“大于 / 小于 / 等于 / 区间”。</p>
                             </div>
-                            <button class="btn btn-ghost" type="button" id="filter-toggle-btn">收起筛选</button>
+                            <button class="btn btn-ghost" type="button" id="reset-filters-btn">重置筛选</button>
                         </div>
 
-                        <div id="filters-block">
-                            <div class="filters-grid">
-                                <div class="field">
-                                    <label for="filter-name">饰品名称</label>
-                                    <input class="input" type="text" id="filter-name" placeholder="关键词">
-                                </div>
-                                <div class="field">
-                                    <label>BUFF 出售价</label>
-                                    <div class="range-inputs">
-                                        <input class="input" type="number" id="filter-buff-price-min" placeholder="最低">
-                                        <span>-</span>
-                                        <input class="input" type="number" id="filter-buff-price-max" placeholder="最高">
-                                    </div>
-                                </div>
-                                <div class="field">
-                                    <label>Steam 出售价</label>
-                                    <div class="range-inputs">
-                                        <input class="input" type="number" id="filter-steam-price-min" placeholder="最低">
-                                        <span>-</span>
-                                        <input class="input" type="number" id="filter-steam-price-max" placeholder="最高">
-                                    </div>
-                                </div>
-                                <div class="field">
-                                    <label>求购价比例</label>
-                                    <div class="range-inputs">
-                                        <input class="input" type="number" step="0.01" id="filter-buy-ratio-min" placeholder="最小">
-                                        <span>-</span>
-                                        <input class="input" type="number" step="0.01" id="filter-buy-ratio-max" placeholder="最大">
-                                    </div>
-                                </div>
-                                <div class="field">
-                                    <label>出售价比例</label>
-                                    <div class="range-inputs">
-                                        <input class="input" type="number" step="0.01" id="filter-sell-ratio-min" placeholder="最小">
-                                        <span>-</span>
-                                        <input class="input" type="number" step="0.01" id="filter-sell-ratio-max" placeholder="最大">
-                                    </div>
-                                </div>
-                                <div class="field">
-                                    <label>Steam 成交量</label>
-                                    <div class="range-inputs">
-                                        <input class="input" type="number" id="filter-volume-min" placeholder="最小">
-                                        <span>-</span>
-                                        <input class="input" type="number" id="filter-volume-max" placeholder="最大">
+                        <div class="filters-grid filters-grid-rich" id="filters-block">
+                            <div class="field">
+                                <label for="filter-name">饰品名称</label>
+                                <input class="input" type="text" id="filter-name" placeholder="输入关键词后自动筛选">
+                            </div>
+
+                            <div class="field">
+                                <label>BUFF 出售价</label>
+                                <div class="filter-operator-group">
+                                    <select class="select filter-operator" id="filter-buff-price-mode">
+                                        <option value="min">大于等于</option>
+                                        <option value="max">小于等于</option>
+                                        <option value="eq">等于</option>
+                                        <option value="between">区间</option>
+                                    </select>
+                                    <div class="operator-values" data-operator-block="buff-price">
+                                        <input class="input" type="number" id="filter-buff-price-primary" placeholder="数值">
+                                        <input class="input secondary" type="number" id="filter-buff-price-secondary" placeholder="最大值" hidden>
                                     </div>
                                 </div>
                             </div>
-                            <div class="inline-actions" style="margin-top: 16px;">
-                                <button class="btn btn-primary" type="button" id="run-filters-btn">应用筛选</button>
-                                <button class="btn btn-secondary" type="button" id="reset-filters-btn">重置筛选</button>
+
+                            <div class="field">
+                                <label>Steam 出售价</label>
+                                <div class="filter-operator-group">
+                                    <select class="select filter-operator" id="filter-steam-price-mode">
+                                        <option value="min">大于等于</option>
+                                        <option value="max">小于等于</option>
+                                        <option value="eq">等于</option>
+                                        <option value="between">区间</option>
+                                    </select>
+                                    <div class="operator-values" data-operator-block="steam-price">
+                                        <input class="input" type="number" id="filter-steam-price-primary" placeholder="数值">
+                                        <input class="input secondary" type="number" id="filter-steam-price-secondary" placeholder="最大值" hidden>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label>出售价比例</label>
+                                <div class="filter-operator-group">
+                                    <select class="select filter-operator" id="filter-sell-ratio-mode">
+                                        <option value="max">小于等于</option>
+                                        <option value="min">大于等于</option>
+                                        <option value="eq">等于</option>
+                                        <option value="between">区间</option>
+                                    </select>
+                                    <div class="operator-values" data-operator-block="sell-ratio">
+                                        <input class="input" type="number" step="0.01" id="filter-sell-ratio-primary" placeholder="数值">
+                                        <input class="input secondary" type="number" step="0.01" id="filter-sell-ratio-secondary" placeholder="最大值" hidden>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label>Steam 成交量</label>
+                                <div class="filter-operator-group">
+                                    <select class="select filter-operator" id="filter-volume-mode">
+                                        <option value="min">大于等于</option>
+                                        <option value="max">小于等于</option>
+                                        <option value="eq">等于</option>
+                                        <option value="between">区间</option>
+                                    </select>
+                                    <div class="operator-values" data-operator-block="volume">
+                                        <input class="input" type="number" id="filter-volume-primary" placeholder="数值">
+                                        <input class="input secondary" type="number" id="filter-volume-secondary" placeholder="最大值" hidden>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label>更新时间</label>
+                                <div class="filter-operator-group">
+                                    <select class="select filter-operator" id="filter-update-time-mode">
+                                        <option value="after">晚于</option>
+                                        <option value="before">早于</option>
+                                        <option value="on">等于日期</option>
+                                        <option value="between">日期区间</option>
+                                    </select>
+                                    <div class="operator-values" data-operator-block="update-time">
+                                        <input class="input" type="date" id="filter-update-time-primary">
+                                        <input class="input secondary" type="date" id="filter-update-time-secondary" hidden>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -298,7 +358,7 @@
                     <div class="toolbar" style="margin-bottom: 18px;">
                         <div class="toolbar-copy">
                             <h3>数据表格</h3>
-                            <p>Steam 链接已按 `appid/market_hash_name` 结构修复，避免旧版错误跳转。</p>
+                            <p>已经移除求购价与求购价比例，只保留实际需要的市场数据。</p>
                         </div>
                     </div>
 
@@ -311,7 +371,6 @@
                                         <th>链接</th>
                                         <th><button type="button" data-sort-key="buff_sell_price">BUFF 出售价</button></th>
                                         <th><button type="button" data-sort-key="steam_sell_price">Steam 出售价</button></th>
-                                        <th><button type="button" data-sort-key="steam_buy_ratio">求购价比例</button></th>
                                         <th><button type="button" data-sort-key="steam_sell_ratio">出售价比例</button></th>
                                         <th><button type="button" data-sort-key="buff_sell_num">BUFF 在售数</button></th>
                                         <th><button type="button" data-sort-key="steam_sell_num">Steam 在售数</button></th>
@@ -320,7 +379,7 @@
                                     </tr>
                                 </thead>
                                 <tbody id="data-table-body">
-                                    <tr><td colspan="10"><div class="empty-state">正在加载数据...</div></td></tr>
+                                    <tr><td colspan="9"><div class="empty-state">正在加载数据...</div></td></tr>
                                 </tbody>
                             </table>
                         </div>

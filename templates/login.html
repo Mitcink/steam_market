@@ -8,8 +8,8 @@
     <section class="login-hero">
         <div class="hero-mark">Steam Market Desk</div>
         <div class="hero-copy">
-            <h1>重新定义饰品监控工作台</h1>
-            <p>把 Buff 与 Steam 市场信息集中到一个更清晰、更快、更适合持续盯盘的界面里。当前版本已经升级为统一仪表盘体验，减少切页和无效操作。</p>
+            <h1>重新整理你的饰品监控工作台</h1>
+            <p>把 Buff 与 Steam 市场信息放进一个更清晰、更稳定、更适合持续盯盘的后台界面里。</p>
         </div>
         <div class="hero-metrics">
             <div class="hero-metric">
@@ -18,11 +18,11 @@
             </div>
             <div class="hero-metric">
                 <strong>4</strong>
-                <span>核心页面已统一视觉语言</span>
+                <span>核心页面统一交互语言</span>
             </div>
             <div class="hero-metric">
                 <strong>24h</strong>
-                <span>默认持久会话配置</span>
+                <span>默认持久会话策略</span>
             </div>
         </div>
     </section>
@@ -31,7 +31,7 @@
         <div class="auth-card">
             <div class="eyebrow">Secure Access</div>
             <h2>登录工作台</h2>
-            <p class="muted">输入账号后直接进入新版控制台。默认管理员账号仍为 `admin / admin123`，建议上线前立即修改。</p>
+            <p class="muted">输入账户信息后进入控制台。</p>
 
             {% if error %}
             <div class="alert alert-danger">{{ error }}</div>
@@ -40,13 +40,12 @@
             <form method="POST" action="{{ url_for('login') }}" class="form-stack">
                 <div class="field">
                     <label for="username">用户名</label>
-                    <input class="input" type="text" id="username" name="username" required placeholder="输入用户名">
+                    <input class="input" type="text" id="username" name="username" required>
                 </div>
 
                 <div class="field">
                     <label for="password">密码</label>
-                    <input class="input" type="password" id="password" name="password" required placeholder="输入密码">
-                    <span class="field-hint">服务端仍沿用当前会话策略，无需额外前端持久化逻辑。</span>
+                    <input class="input" type="password" id="password" name="password" required>
                 </div>
 
                 <label class="checkbox-line" for="remember">

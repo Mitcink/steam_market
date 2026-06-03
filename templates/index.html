@@ -150,7 +150,7 @@
             </div>
         </section>
 
-        <section class="dashboard-grid" data-page="settings" id="settings" hidden>
+        <section class="dashboard-grid" data-page="settings" id="settings">
             <article class="card">
                 <div class="card-header">
                     <div>
@@ -167,14 +167,14 @@
                         </div>
                         <div class="field">
                             <label>游戏类型</label>
-                            <div class="segmented segmented-compact">
+                            <div class="mini-segmented" data-game-switch>
                                 <label>
                                     <input type="radio" name="game_type" value="CSGO" checked>
-                                    <span>CSGO</span>
+                                    <span>CS2 / CSGO</span>
                                 </label>
                                 <label>
                                     <input type="radio" name="game_type" value="DOTA2">
-                                    <span>DOTA2</span>
+                                    <span>Dota 2</span>
                                 </label>
                             </div>
                         </div>
@@ -199,9 +199,18 @@
                                     <h4 class="card-title">BUFF Session</h4>
                                     <p class="card-subtitle">浏览器无法直接读取第三方站点的受保护 Cookie，这里提供一键跳转和填写入口。</p>
                                 </div>
-                                <div class="inline-actions">
+                                <div class="inline-actions token-actions">
                                     <button class="btn btn-secondary" type="button" data-open-external="https://buff.163.com">打开 Buff</button>
-                                    <button class="btn btn-ghost" type="button" data-copy-guide="buff">查看获取说明</button>
+                                    <button class="btn btn-ghost" type="button" data-toggle-guide="buff">查看获取说明</button>
+                                </div>
+                                <div class="token-guide-panel" id="guide-buff" hidden>
+                                    <strong>获取方式</strong>
+                                    <ol class="token-guide-list">
+                                        <li>点击“打开 Buff”并完成登录。</li>
+                                        <li>打开浏览器开发者工具，进入 Application 或 Storage 面板。</li>
+                                        <li>找到 `buff.163.com` 下的 `session` 值。</li>
+                                        <li>复制后粘贴回当前输入框。</li>
+                                    </ol>
                                 </div>
                                 <div class="field">
                                     <textarea class="textarea" id="buff-session" placeholder="在 Buff 登录后，将 session 值粘贴到这里"></textarea>
@@ -215,9 +224,18 @@
                                     <h4 class="card-title">Steam Cookies</h4>
                                     <p class="card-subtitle">同样受浏览器同源与 HttpOnly 限制，这里提供一键打开 Steam 与复制说明。</p>
                                 </div>
-                                <div class="inline-actions">
+                                <div class="inline-actions token-actions">
                                     <button class="btn btn-secondary" type="button" data-open-external="https://steamcommunity.com/market/">打开 Steam 市场</button>
-                                    <button class="btn btn-ghost" type="button" data-copy-guide="steam">查看获取说明</button>
+                                    <button class="btn btn-ghost" type="button" data-toggle-guide="steam">查看获取说明</button>
+                                </div>
+                                <div class="token-guide-panel" id="guide-steam" hidden>
+                                    <strong>获取方式</strong>
+                                    <ol class="token-guide-list">
+                                        <li>点击“打开 Steam 市场”并完成登录。</li>
+                                        <li>打开浏览器开发者工具，进入 Network 或 Application 面板。</li>
+                                        <li>从 `steamcommunity.com` 的请求头或 Cookies 中整理需要的 Cookie 字符串。</li>
+                                        <li>复制后粘贴回当前输入框。</li>
+                                    </ol>
                                 </div>
                                 <div class="field">
                                     <textarea class="textarea" id="steam-cookies" placeholder="登录 Steam 后，将需要的 Cookie 字符串粘贴到这里"></textarea>
@@ -241,7 +259,7 @@
         </section>
         {% endif %}
 
-        <section class="dashboard-grid" data-page="data" id="data" {% if is_admin %}hidden{% endif %}>
+        <section class="dashboard-grid" data-page="data" id="data">
             <article class="card">
                 <div class="card-body">
                     <div class="toolbar">
@@ -258,100 +276,122 @@
                         </div>
                     </div>
 
-                    <section class="filters">
+                    <section class="filters filters-redesigned">
                         <div class="filters-top">
                             <div>
                                 <h4>即时筛选</h4>
-                                <p>填写任意条件后立即生效。范围类条件支持“大于 / 小于 / 等于 / 区间”。</p>
+                                <p>参考数据后台常见的高级搜索和已选条件 chips 方案，输入后立即生效。</p>
                             </div>
-                            <button class="btn btn-ghost" type="button" id="reset-filters-btn">重置筛选</button>
+                            <button class="btn btn-ghost" type="button" id="reset-filters-btn">清空全部条件</button>
                         </div>
 
-                        <div class="filters-grid filters-grid-rich" id="filters-block">
-                            <div class="field">
-                                <label for="filter-name">饰品名称</label>
-                                <input class="input" type="text" id="filter-name" placeholder="输入关键词后自动筛选">
-                            </div>
+                        <div class="active-filter-bar" id="active-filter-chips">
+                            <span class="soft">当前没有筛选条件</span>
+                        </div>
 
-                            <div class="field">
-                                <label>BUFF 出售价</label>
-                                <div class="filter-operator-group">
+                        <div class="filter-rack" id="filters-block">
+                            <article class="filter-card" data-filter-card="name">
+                                <div class="filter-card-head">
+                                    <span class="filter-card-label">饰品名称</span>
+                                    <span class="filter-card-note">关键词</span>
+                                </div>
+                                <input class="input" type="text" id="filter-name" placeholder="例如：AK-47 / Arcana">
+                            </article>
+
+                            <article class="filter-card" data-filter-card="buff-price">
+                                <div class="filter-card-head">
+                                    <span class="filter-card-label">BUFF 出售价</span>
+                                    <span class="filter-card-note">数值筛选</span>
+                                </div>
+                                <div class="filter-inline">
                                     <select class="select filter-operator" id="filter-buff-price-mode">
-                                        <option value="min">大于等于</option>
-                                        <option value="max">小于等于</option>
-                                        <option value="eq">等于</option>
+                                        <option value="min">≥</option>
+                                        <option value="max">≤</option>
+                                        <option value="eq">=</option>
                                         <option value="between">区间</option>
                                     </select>
-                                    <div class="operator-values" data-operator-block="buff-price">
-                                        <input class="input" type="number" id="filter-buff-price-primary" placeholder="数值">
-                                        <input class="input secondary" type="number" id="filter-buff-price-secondary" placeholder="最大值" hidden>
+                                    <div class="operator-values inline-values">
+                                        <input class="input" type="number" id="filter-buff-price-primary" placeholder="输入数值">
+                                        <input class="input secondary" type="number" id="filter-buff-price-secondary" placeholder="到" hidden>
                                     </div>
                                 </div>
-                            </div>
+                            </article>
 
-                            <div class="field">
-                                <label>Steam 出售价</label>
-                                <div class="filter-operator-group">
+                            <article class="filter-card" data-filter-card="steam-price">
+                                <div class="filter-card-head">
+                                    <span class="filter-card-label">Steam 出售价</span>
+                                    <span class="filter-card-note">数值筛选</span>
+                                </div>
+                                <div class="filter-inline">
                                     <select class="select filter-operator" id="filter-steam-price-mode">
-                                        <option value="min">大于等于</option>
-                                        <option value="max">小于等于</option>
-                                        <option value="eq">等于</option>
+                                        <option value="min">≥</option>
+                                        <option value="max">≤</option>
+                                        <option value="eq">=</option>
                                         <option value="between">区间</option>
                                     </select>
-                                    <div class="operator-values" data-operator-block="steam-price">
-                                        <input class="input" type="number" id="filter-steam-price-primary" placeholder="数值">
-                                        <input class="input secondary" type="number" id="filter-steam-price-secondary" placeholder="最大值" hidden>
+                                    <div class="operator-values inline-values">
+                                        <input class="input" type="number" id="filter-steam-price-primary" placeholder="输入数值">
+                                        <input class="input secondary" type="number" id="filter-steam-price-secondary" placeholder="到" hidden>
                                     </div>
                                 </div>
-                            </div>
+                            </article>
 
-                            <div class="field">
-                                <label>出售价比例</label>
-                                <div class="filter-operator-group">
+                            <article class="filter-card" data-filter-card="sell-ratio">
+                                <div class="filter-card-head">
+                                    <span class="filter-card-label">出售价比例</span>
+                                    <span class="filter-card-note">Buff / Steam*0.85</span>
+                                </div>
+                                <div class="filter-inline">
                                     <select class="select filter-operator" id="filter-sell-ratio-mode">
-                                        <option value="max">小于等于</option>
-                                        <option value="min">大于等于</option>
-                                        <option value="eq">等于</option>
+                                        <option value="max">≤</option>
+                                        <option value="min">≥</option>
+                                        <option value="eq">=</option>
                                         <option value="between">区间</option>
                                     </select>
-                                    <div class="operator-values" data-operator-block="sell-ratio">
-                                        <input class="input" type="number" step="0.01" id="filter-sell-ratio-primary" placeholder="数值">
-                                        <input class="input secondary" type="number" step="0.01" id="filter-sell-ratio-secondary" placeholder="最大值" hidden>
+                                    <div class="operator-values inline-values">
+                                        <input class="input" type="number" step="0.01" id="filter-sell-ratio-primary" placeholder="例如 0.88">
+                                        <input class="input secondary" type="number" step="0.01" id="filter-sell-ratio-secondary" placeholder="到" hidden>
                                     </div>
                                 </div>
-                            </div>
+                            </article>
 
-                            <div class="field">
-                                <label>Steam 成交量</label>
-                                <div class="filter-operator-group">
+                            <article class="filter-card" data-filter-card="volume">
+                                <div class="filter-card-head">
+                                    <span class="filter-card-label">Steam 成交量</span>
+                                    <span class="filter-card-note">流动性</span>
+                                </div>
+                                <div class="filter-inline">
                                     <select class="select filter-operator" id="filter-volume-mode">
-                                        <option value="min">大于等于</option>
-                                        <option value="max">小于等于</option>
-                                        <option value="eq">等于</option>
+                                        <option value="min">≥</option>
+                                        <option value="max">≤</option>
+                                        <option value="eq">=</option>
                                         <option value="between">区间</option>
                                     </select>
-                                    <div class="operator-values" data-operator-block="volume">
-                                        <input class="input" type="number" id="filter-volume-primary" placeholder="数值">
-                                        <input class="input secondary" type="number" id="filter-volume-secondary" placeholder="最大值" hidden>
+                                    <div class="operator-values inline-values">
+                                        <input class="input" type="number" id="filter-volume-primary" placeholder="输入数值">
+                                        <input class="input secondary" type="number" id="filter-volume-secondary" placeholder="到" hidden>
                                     </div>
                                 </div>
-                            </div>
+                            </article>
 
-                            <div class="field">
-                                <label>更新时间</label>
-                                <div class="filter-operator-group">
+                            <article class="filter-card" data-filter-card="update-time">
+                                <div class="filter-card-head">
+                                    <span class="filter-card-label">更新时间</span>
+                                    <span class="filter-card-note">日期筛选</span>
+                                </div>
+                                <div class="filter-inline">
                                     <select class="select filter-operator" id="filter-update-time-mode">
                                         <option value="after">晚于</option>
                                         <option value="before">早于</option>
-                                        <option value="on">等于日期</option>
-                                        <option value="between">日期区间</option>
+                                        <option value="on">当天</option>
+                                        <option value="between">区间</option>
                                     </select>
-                                    <div class="operator-values" data-operator-block="update-time">
+                                    <div class="operator-values inline-values">
                                         <input class="input" type="date" id="filter-update-time-primary">
                                         <input class="input secondary" type="date" id="filter-update-time-secondary" hidden>
                                     </div>
                                 </div>
-                            </div>
+                            </article>
                         </div>
                     </section>
 

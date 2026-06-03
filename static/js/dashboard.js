@@ -13,6 +13,7 @@
         lastDataHash: "",
         crawlerStatus: "stopped",
         activePage: null,
+        sectionObserver: null,
     };
 
     const root = document.querySelector("[data-dashboard-root]");
@@ -46,6 +47,7 @@
         dataSummary: document.getElementById("data-summary"),
         opportunitySummary: document.getElementById("opportunity-summary"),
         filterSummary: document.getElementById("filter-summary"),
+        activeFilterChips: document.getElementById("active-filter-chips"),
     };
 
     const configFieldIds = [
@@ -86,25 +88,10 @@
         ["filter-update-time-mode", "filter-update-time-secondary"],
     ];
 
-    const tokenGuides = {
-        buff: [
-            "1. 点击“打开 Buff”并完成登录。",
-            "2. 打开浏览器开发者工具，进入 Application 或 存储 面板。",
-            "3. 在 Cookies 里找到 buff.163.com 的 session 值。",
-            "4. 复制后粘贴回当前页面。",
-        ].join("\n"),
-        steam: [
-            "1. 点击“打开 Steam 市场”并完成登录。",
-            "2. 打开浏览器开发者工具，进入 Network 或 Application 面板。",
-            "3. 从 steamcommunity.com 的请求头或 Cookies 中整理需要的 Cookie 字符串。",
-            "4. 复制后粘贴回当前页面。",
-        ].join("\n"),
-    };
-
     document.addEventListener("DOMContentLoaded", init);
 
     function init() {
-        bindPageTabs();
+        bindSectionNavigation();
         bindButtons();
         bindSorting();
         setupAutoSave();
@@ -112,53 +99,91 @@
         setupExternalActions();
         loadConfig();
 
-        const initialPage = resolveInitialPage();
-        activatePage(initialPage, false);
+        activateInitialSection();
 
         checkCrawlerStatus();
         state.statusInterval = window.setInterval(checkCrawlerStatus, 10000);
         fetchData();
     }
 
-    function resolveInitialPage() {
-        const hash = window.location.hash.replace("#", "");
-        const validPages = elements.pages.map((page) => page.dataset.page);
-        if (hash && validPages.includes(hash)) {
-            return hash;
-        }
-        return isAdmin ? "overview" : "data";
-    }
-
-    function bindPageTabs() {
+    function bindSectionNavigation() {
         elements.pageTabs.forEach((link) => {
             link.addEventListener("click", (event) => {
+                const targetId = link.dataset.pageTarget;
+                const target = document.getElementById(targetId);
+                if (!target) {
+                    return;
+                }
                 event.preventDefault();
-                activatePage(link.dataset.pageTarget, true);
+                activatePage(targetId, true);
+                target.scrollIntoView({ behavior: "smooth", block: "start" });
             });
         });
 
         window.addEventListener("hashchange", () => {
-            const page = resolveInitialPage();
-            if (page !== state.activePage) {
-                activatePage(page, false);
+            const sectionId = resolveSectionId();
+            if (!sectionId) {
+                return;
             }
+            activatePage(sectionId, false);
+        });
+
+        if (!("IntersectionObserver" in window) || !elements.pages.length) {
+            return;
+        }
+
+        state.sectionObserver = new IntersectionObserver(
+            (entries) => {
+                const visibleSections = entries
+                    .filter((entry) => entry.isIntersecting)
+                    .sort((left, right) => right.intersectionRatio - left.intersectionRatio);
+
+                if (!visibleSections.length) {
+                    return;
+                }
+
+                const sectionId = visibleSections[0].target.id;
+                activatePage(sectionId, false);
+            },
+            {
+                root: null,
+                rootMargin: "-18% 0px -55% 0px",
+                threshold: [0.2, 0.4, 0.6],
+            },
+        );
+
+        elements.pages.forEach((page) => {
+            state.sectionObserver.observe(page);
         });
     }
 
     function activatePage(pageName, syncHash) {
+        if (!pageName) {
+            return;
+        }
         state.activePage = pageName;
 
         elements.pageTabs.forEach((tab) => {
             tab.classList.toggle("is-active", tab.dataset.pageTarget === pageName);
         });
 
-        elements.pages.forEach((page) => {
-            page.hidden = page.dataset.page !== pageName;
-        });
-
         if (syncHash && window.location.hash !== `#${pageName}`) {
             history.replaceState(null, "", `#${pageName}`);
         }
+    }
+
+    function activateInitialSection() {
+        const sectionId = resolveSectionId() || (isAdmin ? "overview" : "data");
+        activatePage(sectionId, false);
+    }
+
+    function resolveSectionId() {
+        const hash = window.location.hash.replace("#", "");
+        const validPages = elements.pages.map((page) => page.dataset.page);
+        if (hash && validPages.includes(hash)) {
+            return hash;
+        }
+        return null;
     }
 
     function bindButtons() {
@@ -243,19 +268,18 @@
             });
         });
 
-        document.querySelectorAll("[data-copy-guide]").forEach((button) => {
-            button.addEventListener("click", async () => {
-                const guideKey = button.dataset.copyGuide;
-                const content = tokenGuides[guideKey];
-                if (!content) {
+        document.querySelectorAll("[data-toggle-guide]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const guideKey = button.dataset.toggleGuide;
+                const panel = document.getElementById(`guide-${guideKey}`);
+                if (!panel) {
                     return;
                 }
-                try {
-                    await navigator.clipboard.writeText(content);
-                    writeLog(elements.crawlerLog, "success", "获取说明已复制到剪贴板。");
-                } catch (error) {
-                    window.alert(content);
-                }
+                const shouldOpen = panel.hidden;
+                document.querySelectorAll(".token-guide-panel").forEach((item) => {
+                    item.hidden = true;
+                });
+                panel.hidden = !shouldOpen;
             });
         });
     }
@@ -732,6 +756,8 @@
                 ? `已启用 ${activeCount} 项筛选条件，排序和筛选会同时生效。`
                 : "当前未启用任何筛选条件。";
         }
+
+        renderActiveFilterChips();
     }
 
     function countActiveFilters(filters) {
@@ -745,6 +771,76 @@
             }
         });
         return count;
+    }
+
+    function renderActiveFilterChips() {
+        if (!elements.activeFilterChips) {
+            return;
+        }
+
+        const chips = [];
+        if (state.filters.name) {
+            chips.push(renderChip(`名称: ${state.filters.name}`));
+        }
+        if (state.filters.buffPrice) {
+            chips.push(renderChip(`BUFF 出售价 ${describeOperatorFilter(state.filters.buffPrice)}`));
+        }
+        if (state.filters.steamPrice) {
+            chips.push(renderChip(`Steam 出售价 ${describeOperatorFilter(state.filters.steamPrice)}`));
+        }
+        if (state.filters.sellRatio) {
+            chips.push(renderChip(`出售价比例 ${describeOperatorFilter(state.filters.sellRatio)}`));
+        }
+        if (state.filters.volume) {
+            chips.push(renderChip(`Steam 成交量 ${describeOperatorFilter(state.filters.volume)}`));
+        }
+        if (state.filters.updateTime) {
+            chips.push(renderChip(`更新时间 ${describeDateFilter(state.filters.updateTime)}`));
+        }
+
+        elements.activeFilterChips.innerHTML = chips.length ? chips.join("") : '<span class="soft">当前没有筛选条件</span>';
+    }
+
+    function renderChip(text) {
+        return `<span class="filter-chip">${escapeHtml(text)}</span>`;
+    }
+
+    function describeOperatorFilter(filter) {
+        if (!filter) {
+            return "";
+        }
+        if (filter.mode === "min") {
+            return `≥ ${filter.primary}`;
+        }
+        if (filter.mode === "max") {
+            return `≤ ${filter.primary}`;
+        }
+        if (filter.mode === "eq") {
+            return `= ${filter.primary}`;
+        }
+        if (filter.mode === "between") {
+            return `${filter.primary} - ${filter.secondary ?? filter.primary}`;
+        }
+        return "";
+    }
+
+    function describeDateFilter(filter) {
+        if (!filter) {
+            return "";
+        }
+        if (filter.mode === "after") {
+            return `晚于 ${filter.primary}`;
+        }
+        if (filter.mode === "before") {
+            return `早于 ${filter.primary}`;
+        }
+        if (filter.mode === "on") {
+            return `在 ${filter.primary}`;
+        }
+        if (filter.mode === "between") {
+            return `${filter.primary} - ${filter.secondary ?? filter.primary}`;
+        }
+        return "";
     }
 
     function getCurrentData() {

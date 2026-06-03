@@ -640,22 +640,34 @@ select {
 
 .settings-strip {
     display: grid;
-    gap: 16px;
+    gap: 20px;
+    justify-items: center;
 }
 
 .settings-metrics {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 132px));
+    grid-template-columns: repeat(4, minmax(92px, 112px));
     gap: 14px;
     align-items: end;
+}
+
+.settings-metrics-centered {
+    justify-content: center;
 }
 
 .field-pill {
     gap: 10px;
 }
 
+.field-pill-centered {
+    justify-items: center;
+    text-align: center;
+}
+
 .field-compact {
     gap: 6px;
+    justify-items: center;
+    text-align: center;
 }
 
 .field-compact label,
@@ -664,23 +676,34 @@ select {
 }
 
 .input-compact {
-    max-width: 132px;
-    padding: 12px 14px;
+    width: 100%;
+    min-width: 0;
+    max-width: 112px;
+    min-height: 56px;
+    padding: 10px 12px;
     font-variant-numeric: tabular-nums;
+    text-align: center;
+    border-radius: 18px;
 }
 
 .input-date {
-    max-width: 170px;
+    max-width: 148px;
 }
 
 .mini-segmented {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 4px;
+    padding: 6px;
     border-radius: 999px;
     background: rgba(23, 49, 58, 0.06);
     width: fit-content;
+}
+
+.mini-segmented-strong {
+    padding: 6px;
+    background: rgba(23, 49, 58, 0.08);
+    border: 1px solid rgba(23, 49, 58, 0.08);
 }
 
 .mini-segmented label {
@@ -698,8 +721,9 @@ select {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 98px;
-    padding: 9px 14px;
+    min-width: 124px;
+    min-height: 46px;
+    padding: 10px 18px;
     border-radius: 999px;
     color: var(--text-soft);
     font-size: 13px;
@@ -941,6 +965,7 @@ select {
     gap: 10px;
     flex-wrap: wrap;
     min-height: 42px;
+    justify-content: center;
 }
 
 .filter-chip {
@@ -964,13 +989,27 @@ select {
     padding-top: 4px;
 }
 
+.filter-bar-centered {
+    justify-content: center;
+}
+
 .field-filter-name {
-    min-width: 220px;
+    min-width: 180px;
+    justify-items: center;
+    text-align: center;
 }
 
 .input-filter-name {
-    max-width: 240px;
-    padding: 12px 14px;
+    width: 100%;
+    max-width: 180px;
+    padding: 10px 14px;
+    text-align: center;
+}
+
+.input-tile {
+    min-height: 56px;
+    border-radius: 18px;
+    box-shadow: 0 6px 18px rgba(23, 49, 58, 0.05);
 }
 
 .range-inputs {
@@ -1365,7 +1404,7 @@ select {
     }
 
     .settings-metrics {
-        grid-template-columns: repeat(2, minmax(0, 132px));
+        grid-template-columns: repeat(2, minmax(92px, 112px));
     }
 
     .user-row {
@@ -1415,7 +1454,7 @@ select {
     }
 
     .settings-metrics {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(92px, 112px));
     }
 
     .input-compact,

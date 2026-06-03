@@ -161,9 +161,9 @@
                 </div>
                 <div class="card-body section">
                     <div class="settings-strip">
-                        <div class="field field-pill">
+                        <div class="field field-pill field-pill-centered">
                             <label>游戏类型</label>
-                            <div class="mini-segmented" data-game-switch>
+                            <div class="mini-segmented mini-segmented-strong" data-game-switch>
                                 <label>
                                     <input type="radio" name="game_type" value="CSGO" checked>
                                     <span>CS2 / CSGO</span>
@@ -174,7 +174,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="settings-metrics">
+                        <div class="settings-metrics settings-metrics-centered">
                             <div class="field field-compact">
                                 <label for="max-threads">线程数</label>
                                 <input class="input input-compact" type="number" id="max-threads" min="1" max="99" value="2">
@@ -290,34 +290,34 @@
                             </div>
                         </div>
 
-                        <div class="active-filter-bar" id="active-filter-chips">
+                        <div class="active-filter-bar" id="active-filter-chips" hidden>
                             <span class="soft">正在使用默认筛选</span>
                         </div>
 
-                        <div class="filter-bar" id="filters-block">
+                        <div class="filter-bar filter-bar-centered" id="filters-block">
                             <div class="field field-filter-name">
                                 <label for="filter-name">饰品名称</label>
-                                <input class="input input-filter-name" type="text" id="filter-name" placeholder="AK-47 / Arcana">
+                                <input class="input input-filter-name input-tile" type="text" id="filter-name" placeholder="AK-47 / Arcana">
                             </div>
                             <div class="field field-compact">
                                 <label for="filter-buff-price-primary">BUFF 出售价(≥)</label>
-                                <input class="input input-compact" type="number" id="filter-buff-price-primary" min="0" max="999" value="20">
+                                <input class="input input-compact input-tile" type="number" id="filter-buff-price-primary" min="0" max="999" value="20">
                             </div>
                             <div class="field field-compact">
                                 <label for="filter-steam-price-primary">Steam 出售价(≥)</label>
-                                <input class="input input-compact" type="number" id="filter-steam-price-primary" min="0" max="999" value="">
+                                <input class="input input-compact input-tile" type="number" id="filter-steam-price-primary" min="0" max="999" value="">
                             </div>
                             <div class="field field-compact">
                                 <label for="filter-sell-ratio-primary">出售价比例(≤)</label>
-                                <input class="input input-compact" type="number" step="0.01" id="filter-sell-ratio-primary" min="0" max="9.99" value="0.8">
+                                <input class="input input-compact input-tile" type="number" step="0.01" id="filter-sell-ratio-primary" min="0" max="9.99" value="0.8">
                             </div>
                             <div class="field field-compact">
                                 <label for="filter-volume-primary">Steam 成交量(≥)</label>
-                                <input class="input input-compact" type="number" id="filter-volume-primary" min="0" max="999" value="20">
+                                <input class="input input-compact input-tile" type="number" id="filter-volume-primary" min="0" max="999" value="20">
                             </div>
                             <div class="field field-compact">
                                 <label for="filter-update-time-primary">更新时间(≥)</label>
-                                <input class="input input-compact input-date" type="date" id="filter-update-time-primary">
+                                <input class="input input-compact input-date input-tile" type="date" id="filter-update-time-primary">
                             </div>
                         </div>
                     </section>

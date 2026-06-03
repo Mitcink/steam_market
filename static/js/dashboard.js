@@ -723,7 +723,14 @@
             chips.push(renderChip(`更新时间(≥) ${state.filters.updateTime.primary}`));
         }
 
-        elements.activeFilterChips.innerHTML = chips.length ? chips.join("") : '<span class="soft">正在使用默认筛选</span>';
+        if (!chips.length) {
+            elements.activeFilterChips.innerHTML = "";
+            elements.activeFilterChips.hidden = true;
+            return;
+        }
+
+        elements.activeFilterChips.hidden = false;
+        elements.activeFilterChips.innerHTML = chips.join("");
     }
 
     function renderChip(text) {

@@ -13,6 +13,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from contextlib import contextmanager
 import urllib3
+from pathlib import Path
 
 # 假设 database.py 存在并处理 items 表
 try:
@@ -37,6 +38,22 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or 'your-secret-key-here-change-in-production'
+
+
+def _static_asset_version(filename):
+    try:
+        asset_path = Path(app.static_folder) / filename
+        return str(int(asset_path.stat().st_mtime))
+    except OSError:
+        return "0"
+
+
+@app.context_processor
+def inject_asset_helpers():
+    def static_asset(filename):
+        return url_for('static', filename=filename, v=_static_asset_version(filename))
+
+    return {"static_asset": static_asset}
 
 # 在模块加载时立即初始化数据库（确保无论如何启动都会执行）
 # 注意：init_db() 函数在后面定义，所以这个调用需要延迟到所有函数定义之后

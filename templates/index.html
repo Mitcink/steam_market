@@ -160,12 +160,8 @@
                     <button class="btn btn-secondary" type="button" id="save-config-btn">立即保存</button>
                 </div>
                 <div class="card-body section">
-                    <div class="form-grid form-grid-compact">
-                        <div class="field">
-                            <label for="max-threads">最大线程数</label>
-                            <input class="input" type="number" id="max-threads" min="1" value="2">
-                        </div>
-                        <div class="field">
+                    <div class="settings-strip">
+                        <div class="field field-pill">
                             <label>游戏类型</label>
                             <div class="mini-segmented" data-game-switch>
                                 <label>
@@ -178,17 +174,23 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="field">
-                            <label for="min-sell-count">BUFF 最小在售数</label>
-                            <input class="input" type="number" id="min-sell-count" min="0" value="20">
-                        </div>
-                        <div class="field">
-                            <label for="min-sell-price">BUFF 最低售价</label>
-                            <input class="input" type="number" id="min-sell-price" min="0" value="25">
-                        </div>
-                        <div class="field">
-                            <label for="max-sell-price">BUFF 最高售价</label>
-                            <input class="input" type="number" id="max-sell-price" min="0" value="300">
+                        <div class="settings-metrics">
+                            <div class="field field-compact">
+                                <label for="max-threads">线程数</label>
+                                <input class="input input-compact" type="number" id="max-threads" min="1" max="99" value="2">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="min-sell-count">在售数</label>
+                                <input class="input input-compact" type="number" id="min-sell-count" min="0" max="999" value="20">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="min-sell-price">最低价</label>
+                                <input class="input input-compact" type="number" id="min-sell-price" min="0" max="999" value="25">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="max-sell-price">最高价</label>
+                                <input class="input input-compact" type="number" id="max-sell-price" min="0" max="999" value="300">
+                            </div>
                         </div>
                     </div>
 
@@ -280,118 +282,43 @@
                         <div class="filters-top">
                             <div>
                                 <h4>即时筛选</h4>
-                                <p>参考数据后台常见的高级搜索和已选条件 chips 方案，输入后立即生效。</p>
+                                <p id="filter-panel-copy">默认按最新日期和业务阈值筛选，输入后立即生效。</p>
                             </div>
-                            <button class="btn btn-ghost" type="button" id="reset-filters-btn">清空全部条件</button>
+                            <div class="inline-actions">
+                                <button class="btn btn-ghost" type="button" id="toggle-filters-btn" aria-expanded="true">收起筛选</button>
+                                <button class="btn btn-ghost" type="button" id="reset-filters-btn">恢复默认</button>
+                            </div>
                         </div>
 
                         <div class="active-filter-bar" id="active-filter-chips">
-                            <span class="soft">当前没有筛选条件</span>
+                            <span class="soft">正在使用默认筛选</span>
                         </div>
 
-                        <div class="filter-rack" id="filters-block">
-                            <article class="filter-card" data-filter-card="name">
-                                <div class="filter-card-head">
-                                    <span class="filter-card-label">饰品名称</span>
-                                    <span class="filter-card-note">关键词</span>
-                                </div>
-                                <input class="input" type="text" id="filter-name" placeholder="例如：AK-47 / Arcana">
-                            </article>
-
-                            <article class="filter-card" data-filter-card="buff-price">
-                                <div class="filter-card-head">
-                                    <span class="filter-card-label">BUFF 出售价</span>
-                                    <span class="filter-card-note">数值筛选</span>
-                                </div>
-                                <div class="filter-inline">
-                                    <select class="select filter-operator" id="filter-buff-price-mode">
-                                        <option value="min">≥</option>
-                                        <option value="max">≤</option>
-                                        <option value="eq">=</option>
-                                        <option value="between">区间</option>
-                                    </select>
-                                    <div class="operator-values inline-values">
-                                        <input class="input" type="number" id="filter-buff-price-primary" placeholder="输入数值">
-                                        <input class="input secondary" type="number" id="filter-buff-price-secondary" placeholder="到" hidden>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <article class="filter-card" data-filter-card="steam-price">
-                                <div class="filter-card-head">
-                                    <span class="filter-card-label">Steam 出售价</span>
-                                    <span class="filter-card-note">数值筛选</span>
-                                </div>
-                                <div class="filter-inline">
-                                    <select class="select filter-operator" id="filter-steam-price-mode">
-                                        <option value="min">≥</option>
-                                        <option value="max">≤</option>
-                                        <option value="eq">=</option>
-                                        <option value="between">区间</option>
-                                    </select>
-                                    <div class="operator-values inline-values">
-                                        <input class="input" type="number" id="filter-steam-price-primary" placeholder="输入数值">
-                                        <input class="input secondary" type="number" id="filter-steam-price-secondary" placeholder="到" hidden>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <article class="filter-card" data-filter-card="sell-ratio">
-                                <div class="filter-card-head">
-                                    <span class="filter-card-label">出售价比例</span>
-                                    <span class="filter-card-note">Buff / Steam*0.85</span>
-                                </div>
-                                <div class="filter-inline">
-                                    <select class="select filter-operator" id="filter-sell-ratio-mode">
-                                        <option value="max">≤</option>
-                                        <option value="min">≥</option>
-                                        <option value="eq">=</option>
-                                        <option value="between">区间</option>
-                                    </select>
-                                    <div class="operator-values inline-values">
-                                        <input class="input" type="number" step="0.01" id="filter-sell-ratio-primary" placeholder="例如 0.88">
-                                        <input class="input secondary" type="number" step="0.01" id="filter-sell-ratio-secondary" placeholder="到" hidden>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <article class="filter-card" data-filter-card="volume">
-                                <div class="filter-card-head">
-                                    <span class="filter-card-label">Steam 成交量</span>
-                                    <span class="filter-card-note">流动性</span>
-                                </div>
-                                <div class="filter-inline">
-                                    <select class="select filter-operator" id="filter-volume-mode">
-                                        <option value="min">≥</option>
-                                        <option value="max">≤</option>
-                                        <option value="eq">=</option>
-                                        <option value="between">区间</option>
-                                    </select>
-                                    <div class="operator-values inline-values">
-                                        <input class="input" type="number" id="filter-volume-primary" placeholder="输入数值">
-                                        <input class="input secondary" type="number" id="filter-volume-secondary" placeholder="到" hidden>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <article class="filter-card" data-filter-card="update-time">
-                                <div class="filter-card-head">
-                                    <span class="filter-card-label">更新时间</span>
-                                    <span class="filter-card-note">日期筛选</span>
-                                </div>
-                                <div class="filter-inline">
-                                    <select class="select filter-operator" id="filter-update-time-mode">
-                                        <option value="after">晚于</option>
-                                        <option value="before">早于</option>
-                                        <option value="on">当天</option>
-                                        <option value="between">区间</option>
-                                    </select>
-                                    <div class="operator-values inline-values">
-                                        <input class="input" type="date" id="filter-update-time-primary">
-                                        <input class="input secondary" type="date" id="filter-update-time-secondary" hidden>
-                                    </div>
-                                </div>
-                            </article>
+                        <div class="filter-bar" id="filters-block">
+                            <div class="field field-filter-name">
+                                <label for="filter-name">饰品名称</label>
+                                <input class="input input-filter-name" type="text" id="filter-name" placeholder="AK-47 / Arcana">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="filter-buff-price-primary">BUFF 出售价(≥)</label>
+                                <input class="input input-compact" type="number" id="filter-buff-price-primary" min="0" max="999" value="20">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="filter-steam-price-primary">Steam 出售价(≥)</label>
+                                <input class="input input-compact" type="number" id="filter-steam-price-primary" min="0" max="999" value="">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="filter-sell-ratio-primary">出售价比例(≤)</label>
+                                <input class="input input-compact" type="number" step="0.01" id="filter-sell-ratio-primary" min="0" max="9.99" value="0.8">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="filter-volume-primary">Steam 成交量(≥)</label>
+                                <input class="input input-compact" type="number" id="filter-volume-primary" min="0" max="999" value="20">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="filter-update-time-primary">更新时间(≥)</label>
+                                <input class="input input-compact input-date" type="date" id="filter-update-time-primary">
+                            </div>
                         </div>
                     </section>
 

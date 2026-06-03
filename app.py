@@ -63,6 +63,15 @@ CORS(app, supports_credentials=True)
 
 DATA_DIR = 'data'
 DB_FILE = os.path.join(DATA_DIR, 'users.db')
+STALE_DATA_WINDOW_DAYS = 15
+
+MARKET_ITEM_QUERY = '''
+    SELECT name, kind, buff_id, steam_market_id, buff_buy_price, buff_sell_price,
+           steam_sell_price, steam_buy_price, steam_sell_num, buff_sell_num,
+           steam_volume, update_time
+    FROM market_items
+    ORDER BY update_time DESC
+'''
 
 # 全局状态控制
 crawled_data = []
@@ -151,6 +160,32 @@ def init_db():
     print("数据库初始化完成")
 
 
+def build_market_items(rows):
+    items = []
+    for row in rows:
+        items.append({
+            'name': row[0],
+            'kind': row[1],
+            'buff_id': row[2],
+            'steam_market_id': row[3],
+            'buff_buy_price': row[4],
+            'buff_sell_price': row[5],
+            'steam_sell_price': row[6],
+            'steam_buy_price': row[7],
+            'steam_sell_num': row[8],
+            'buff_sell_num': row[9],
+            'steam_volume': row[10],
+            'update_time': row[11]
+        })
+    return items
+
+
+def fetch_market_items(conn):
+    cursor = conn.cursor()
+    cursor.execute(MARKET_ITEM_QUERY)
+    return build_market_items(cursor.fetchall())
+
+
 # ===================== 装饰器 =====================
 
 def login_required(f):
@@ -192,33 +227,8 @@ def load_data_from_db():
     """Load crawled data from SQLite database."""
     global crawled_data
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT name, kind, buff_id, steam_market_id, buff_buy_price, buff_sell_price,
-                   steam_sell_price, steam_buy_price, steam_sell_num, buff_sell_num,
-                   steam_volume, update_time
-            FROM market_items
-            ORDER BY update_time DESC
-        ''')
-        rows = cursor.fetchall()
-        crawled_data = []
-        for row in rows:
-            crawled_data.append({
-                'name': row[0],
-                'kind': row[1],
-                'buff_id': row[2],
-                'steam_market_id': row[3],
-                'buff_buy_price': row[4],
-                'buff_sell_price': row[5],
-                'steam_sell_price': row[6],
-                'steam_buy_price': row[7],
-                'steam_sell_num': row[8],
-                'buff_sell_num': row[9],
-                'steam_volume': row[10],
-                'update_time': row[11]
-            })
-        conn.close()
+        with get_db_connection() as conn:
+            crawled_data = fetch_market_items(conn)
         print(f"从数据库加载了 {len(crawled_data)} 条数据")
     except Exception as e:
         print(f"从数据库加载数据时出错: {e}")
@@ -255,6 +265,47 @@ def save_item_to_db(item):
             conn.close()
         except Exception as e:
             print(f"保存数据到数据库时出错: {e}")
+
+
+def prune_stale_market_data(max_age_days=STALE_DATA_WINDOW_DAYS):
+    """删除距离最新抓取日期过旧的残留数据，避免停爬后旧结果长期污染列表。"""
+    global crawled_data
+
+    deleted_count = 0
+    latest_date_str = None
+    cutoff_date_str = None
+
+    with db_lock:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(date(update_time)) FROM market_items")
+                row = cursor.fetchone()
+                latest_date_str = row[0] if row else None
+
+                if not latest_date_str:
+                    return {"deleted": 0, "latest_date": None, "cutoff_date": None}
+
+                latest_date = datetime.strptime(latest_date_str, "%Y-%m-%d").date()
+                cutoff_date = latest_date - timedelta(days=max_age_days)
+                cutoff_date_str = cutoff_date.isoformat()
+
+                cursor.execute(
+                    "DELETE FROM market_items WHERE date(update_time) < ?",
+                    (cutoff_date_str,),
+                )
+                deleted_count = max(cursor.rowcount or 0, 0)
+                conn.commit()
+
+                crawled_data = fetch_market_items(conn)
+        except Exception as e:
+            print(f"清理过期市场数据时出错: {e}")
+            return {"deleted": 0, "latest_date": latest_date_str, "cutoff_date": cutoff_date_str}
+
+    if deleted_count:
+        print(f"已清理 {deleted_count} 条 {cutoff_date_str} 之前的旧数据")
+
+    return {"deleted": deleted_count, "latest_date": latest_date_str, "cutoff_date": cutoff_date_str}
 
 
 def parse_cookies_string(cookie_string):
@@ -546,6 +597,12 @@ def run_crawler(config):
         traceback.print_exc()
     finally:
         is_crawling = False
+        prune_result = prune_stale_market_data()
+        if prune_result["deleted"]:
+            print(
+                f"停止抓取后已清理 {prune_result['deleted']} 条旧数据，"
+                f"保留 {prune_result['cutoff_date']} 及之后的记录。"
+            )
         print("爬虫线程已结束。")
 
 
@@ -841,40 +898,21 @@ def get_status():
 def get_data():
     try:
         with db_lock:
-            # 从数据库读取最新数据
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT name, kind, buff_id, steam_market_id, buff_buy_price, buff_sell_price,
-                       steam_sell_price, steam_buy_price, steam_sell_num, buff_sell_num,
-                       steam_volume, update_time
-                FROM market_items
-                ORDER BY update_time DESC
-            ''')
-            rows = cursor.fetchall()
-            conn.close()
-            
-            items = []
-            for row in rows:
-                items.append({
-                    'name': row[0],
-                    'kind': row[1],
-                    'buff_id': row[2],
-                    'steam_market_id': row[3],
-                    'buff_buy_price': row[4],
-                    'buff_sell_price': row[5],
-                    'steam_sell_price': row[6],
-                    'steam_buy_price': row[7],
-                    'steam_sell_num': row[8],
-                    'buff_sell_num': row[9],
-                    'steam_volume': row[10],
-                    'update_time': row[11]
-                })
+            with get_db_connection() as conn:
+                items = fetch_market_items(conn)
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(date(update_time)) FROM market_items")
+                latest_row = cursor.fetchone()
+                latest_date = latest_row[0] if latest_row else None
             
         return jsonify({
             "success": True,
             "data": items,
-            "count": len(items)
+            "count": len(items),
+            "meta": {
+                "latest_date": latest_date,
+                "stale_window_days": STALE_DATA_WINDOW_DAYS
+            }
         })
     except Exception as e:
         print(f"获取数据时出错: {e}")

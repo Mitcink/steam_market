@@ -1,4 +1,11 @@
 (function () {
+    const root = document.querySelector("[data-dashboard-root]");
+    if (!root) {
+        return;
+    }
+
+    const isAdmin = root.dataset.isAdmin === "true";
+
     const state = {
         itemsPerPage: 20,
         allData: [],
@@ -14,14 +21,9 @@
         crawlerStatus: "stopped",
         activePage: null,
         sectionObserver: null,
+        latestDate: "",
+        filtersExpanded: true,
     };
-
-    const root = document.querySelector("[data-dashboard-root]");
-    if (!root) {
-        return;
-    }
-
-    const isAdmin = root.dataset.isAdmin === "true";
 
     const elements = {
         pageTabs: Array.from(document.querySelectorAll("[data-page-target]")),
@@ -34,6 +36,9 @@
         saveConfigBtn: document.getElementById("save-config-btn"),
         testConnectionBtn: document.getElementById("test-connection-btn"),
         resetFilterBtn: document.getElementById("reset-filters-btn"),
+        toggleFiltersBtn: document.getElementById("toggle-filters-btn"),
+        filtersBlock: document.getElementById("filters-block"),
+        filterPanelCopy: document.getElementById("filter-panel-copy"),
         crawlerLog: document.getElementById("crawler-log-box"),
         testLog: document.getElementById("test-log-box"),
         dataTableBody: document.getElementById("data-table-body"),
@@ -63,29 +68,11 @@
 
     const filterControlIds = [
         "filter-name",
-        "filter-buff-price-mode",
         "filter-buff-price-primary",
-        "filter-buff-price-secondary",
-        "filter-steam-price-mode",
         "filter-steam-price-primary",
-        "filter-steam-price-secondary",
-        "filter-sell-ratio-mode",
         "filter-sell-ratio-primary",
-        "filter-sell-ratio-secondary",
-        "filter-volume-mode",
         "filter-volume-primary",
-        "filter-volume-secondary",
-        "filter-update-time-mode",
         "filter-update-time-primary",
-        "filter-update-time-secondary",
-    ];
-
-    const operatorSecondaryMap = [
-        ["filter-buff-price-mode", "filter-buff-price-secondary"],
-        ["filter-steam-price-mode", "filter-steam-price-secondary"],
-        ["filter-sell-ratio-mode", "filter-sell-ratio-secondary"],
-        ["filter-volume-mode", "filter-volume-secondary"],
-        ["filter-update-time-mode", "filter-update-time-secondary"],
     ];
 
     document.addEventListener("DOMContentLoaded", init);
@@ -98,9 +85,8 @@
         setupFilterControls();
         setupExternalActions();
         loadConfig();
-
         activateInitialSection();
-
+        resetFilters();
         checkCrawlerStatus();
         state.statusInterval = window.setInterval(checkCrawlerStatus, 10000);
         fetchData();
@@ -122,10 +108,9 @@
 
         window.addEventListener("hashchange", () => {
             const sectionId = resolveSectionId();
-            if (!sectionId) {
-                return;
+            if (sectionId) {
+                activatePage(sectionId, false);
             }
-            activatePage(sectionId, false);
         });
 
         if (!("IntersectionObserver" in window) || !elements.pages.length) {
@@ -142,8 +127,7 @@
                     return;
                 }
 
-                const sectionId = visibleSections[0].target.id;
-                activatePage(sectionId, false);
+                activatePage(visibleSections[0].target.id, false);
             },
             {
                 root: null,
@@ -152,9 +136,7 @@
             },
         );
 
-        elements.pages.forEach((page) => {
-            state.sectionObserver.observe(page);
-        });
+        elements.pages.forEach((page) => state.sectionObserver.observe(page));
     }
 
     function activatePage(pageName, syncHash) {
@@ -162,28 +144,22 @@
             return;
         }
         state.activePage = pageName;
-
         elements.pageTabs.forEach((tab) => {
             tab.classList.toggle("is-active", tab.dataset.pageTarget === pageName);
         });
-
         if (syncHash && window.location.hash !== `#${pageName}`) {
             history.replaceState(null, "", `#${pageName}`);
         }
     }
 
     function activateInitialSection() {
-        const sectionId = resolveSectionId() || (isAdmin ? "overview" : "data");
-        activatePage(sectionId, false);
+        activatePage(resolveSectionId() || (isAdmin ? "overview" : "data"), false);
     }
 
     function resolveSectionId() {
         const hash = window.location.hash.replace("#", "");
         const validPages = elements.pages.map((page) => page.dataset.page);
-        if (hash && validPages.includes(hash)) {
-            return hash;
-        }
-        return null;
+        return hash && validPages.includes(hash) ? hash : null;
     }
 
     function bindButtons() {
@@ -202,6 +178,9 @@
         }
         if (elements.resetFilterBtn) {
             elements.resetFilterBtn.addEventListener("click", resetFilters);
+        }
+        if (elements.toggleFiltersBtn) {
+            elements.toggleFiltersBtn.addEventListener("click", toggleFiltersPanel);
         }
         document.querySelectorAll("[data-logout]").forEach((button) => {
             button.addEventListener("click", logout);
@@ -244,20 +223,14 @@
                 return;
             }
 
-            const eventName = element.tagName === "SELECT" || element.type === "date" ? "change" : "input";
-            element.addEventListener(eventName, () => {
-                syncOperatorVisibility();
-                applyFilters();
-            });
-
+            const eventName = element.type === "date" ? "change" : "input";
+            element.addEventListener(eventName, applyFilters);
             element.addEventListener("keydown", (event) => {
                 if (event.key === "Enter") {
                     event.preventDefault();
                 }
             });
         });
-
-        syncOperatorVisibility();
     }
 
     function setupExternalActions() {
@@ -284,21 +257,8 @@
         });
     }
 
-    function syncOperatorVisibility() {
-        operatorSecondaryMap.forEach(([modeId, secondaryId]) => {
-            const mode = document.getElementById(modeId);
-            const secondary = document.getElementById(secondaryId);
-            if (!mode || !secondary) {
-                return;
-            }
-            const visible = mode.value === "between";
-            secondary.hidden = !visible;
-            secondary.disabled = !visible;
-        });
-    }
-
     function getStorageKey() {
-        return "steam_market_dashboard_config_v3";
+        return "steam_market_dashboard_config_v4";
     }
 
     function getFormConfig() {
@@ -401,13 +361,12 @@
         if (!validResponse) {
             return null;
         }
-        const json = await response.json();
-        return { response, json };
+        return { response: validResponse, json: await validResponse.json() };
     }
 
     async function testConnection() {
         const config = getFormConfig();
-        writeLog(elements.testLog, "info", "开始检测 Steam 与 Buff 连通性...");
+        writeLog(elements.testLog, "info", "开始检测 Steam 和 Buff 连通性...");
         elements.testConnectionBtn.disabled = true;
 
         try {
@@ -483,6 +442,7 @@
             if (result.response.ok) {
                 setCrawlerStatus("stopped");
                 stopDataPolling();
+                window.setTimeout(fetchData, 1200);
             }
         } catch (error) {
             writeLog(elements.crawlerLog, "error", `停止失败: ${error.message}`);
@@ -553,6 +513,7 @@
             writeLog(elements.crawlerLog, result.response.ok ? "success" : "error", result.json.message || "清空操作已完成。");
             if (result.response.ok) {
                 state.allData = [];
+                state.latestDate = "";
                 rebuildViewData();
                 updateDashboardMetrics();
                 renderTable();
@@ -583,8 +544,11 @@
                 return;
             }
 
-            const nextHash = `${payload.data.length}:${payload.data[0]?.update_time || "none"}:${payload.data[payload.data.length - 1]?.buff_id || "none"}`;
             state.allData = payload.data;
+            state.latestDate = payload.meta?.latest_date || "";
+            syncDefaultUpdateDate();
+
+            const nextHash = `${payload.data.length}:${payload.data[0]?.update_time || "none"}:${payload.data[payload.data.length - 1]?.buff_id || "none"}`;
             if (nextHash !== state.lastDataHash) {
                 state.lastDataHash = nextHash;
                 rebuildViewData();
@@ -617,106 +581,64 @@
     function collectFilters() {
         return {
             name: getInputValue("filter-name").toLowerCase(),
-            buffPrice: getOperatorFilter("filter-buff-price-mode", "filter-buff-price-primary", "filter-buff-price-secondary", "number"),
-            steamPrice: getOperatorFilter("filter-steam-price-mode", "filter-steam-price-primary", "filter-steam-price-secondary", "number"),
-            sellRatio: getOperatorFilter("filter-sell-ratio-mode", "filter-sell-ratio-primary", "filter-sell-ratio-secondary", "number"),
-            volume: getOperatorFilter("filter-volume-mode", "filter-volume-primary", "filter-volume-secondary", "number"),
-            updateTime: getOperatorFilter("filter-update-time-mode", "filter-update-time-primary", "filter-update-time-secondary", "date"),
+            buffPrice: getThresholdFilter("filter-buff-price-primary", "min"),
+            steamPrice: getThresholdFilter("filter-steam-price-primary", "min"),
+            sellRatio: getThresholdFilter("filter-sell-ratio-primary", "max"),
+            volume: getThresholdFilter("filter-volume-primary", "min"),
+            updateTime: getDateThresholdFilter("filter-update-time-primary", "after"),
         };
     }
 
-    function getOperatorFilter(modeId, primaryId, secondaryId, type) {
-        const mode = document.getElementById(modeId)?.value;
-        const primary = type === "date" ? getDateValue(primaryId) : getNumberValue(primaryId);
-        const secondary = type === "date" ? getDateValue(secondaryId) : getNumberValue(secondaryId);
+    function getThresholdFilter(inputId, mode) {
+        const value = getNumberValue(inputId);
+        return value === null || Number.isNaN(value) ? null : { mode, primary: value };
+    }
 
-        if (primary === null || primary === "") {
-            return null;
-        }
-
-        if (mode === "between" && (secondary === null || secondary === "")) {
-            return { mode: mode === "between" ? "min" : mode, primary, secondary: null };
-        }
-
-        return { mode, primary, secondary };
+    function getDateThresholdFilter(inputId, mode) {
+        const value = getDateValue(inputId);
+        return value ? { mode, primary: value } : null;
     }
 
     function itemMatchesFilters(item, filters) {
         if (filters.name && !String(item.name || "").toLowerCase().includes(filters.name)) {
             return false;
         }
-        if (!matchesOperatorFilter(Number(item.buff_sell_price), filters.buffPrice)) {
+        if (!matchesThreshold(Number(item.buff_sell_price), filters.buffPrice)) {
             return false;
         }
-        if (!matchesOperatorFilter(Number(item.steam_sell_price), filters.steamPrice)) {
+        if (!matchesThreshold(Number(item.steam_sell_price), filters.steamPrice)) {
             return false;
         }
-        if (!matchesOperatorFilter(computeSellRatio(item), filters.sellRatio)) {
+        if (!matchesThreshold(computeSellRatio(item), filters.sellRatio)) {
             return false;
         }
-        if (!matchesOperatorFilter(Number(item.steam_volume), filters.volume)) {
+        if (!matchesThreshold(Number(item.steam_volume), filters.volume)) {
             return false;
         }
-
-        if (filters.updateTime) {
-            const itemDate = parseDateOnly(item.update_time);
-            if (!matchesDateFilter(itemDate, filters.updateTime)) {
-                return false;
-            }
+        if (!matchesDateThreshold(parseDateOnly(item.update_time), filters.updateTime)) {
+            return false;
         }
-
         return true;
     }
 
-    function matchesOperatorFilter(value, filter) {
+    function matchesThreshold(value, filter) {
         if (!filter) {
             return true;
         }
         if (value === null || value === undefined || Number.isNaN(value)) {
             return false;
         }
-
-        switch (filter.mode) {
-            case "min":
-                return value >= filter.primary;
-            case "max":
-                return value <= filter.primary;
-            case "eq":
-                return value === filter.primary;
-            case "between":
-                if (filter.secondary === null || filter.secondary === undefined) {
-                    return value >= filter.primary;
-                }
-                return value >= Math.min(filter.primary, filter.secondary) && value <= Math.max(filter.primary, filter.secondary);
-            default:
-                return true;
-        }
+        return filter.mode === "max" ? value <= filter.primary : value >= filter.primary;
     }
 
-    function matchesDateFilter(value, filter) {
+    function matchesDateThreshold(value, filter) {
         if (!filter) {
             return true;
         }
         if (!value) {
             return false;
         }
-
-        switch (filter.mode) {
-            case "after":
-                return value >= filter.primary;
-            case "before":
-                return value <= filter.primary;
-            case "on":
-                return value === filter.primary;
-            case "between":
-                if (!filter.secondary) {
-                    return value >= filter.primary;
-                }
-                return value >= (filter.primary < filter.secondary ? filter.primary : filter.secondary)
-                    && value <= (filter.primary < filter.secondary ? filter.secondary : filter.primary);
-            default:
-                return true;
-        }
+        return value >= filter.primary;
     }
 
     function updateDashboardMetrics() {
@@ -724,7 +646,7 @@
         const totalCount = data.length;
         const candidateCount = data.filter((item) => {
             const ratio = computeSellRatio(item);
-            return ratio !== null && ratio < 0.88;
+            return ratio !== null && ratio <= 0.8;
         }).length;
         const latest = data[0]?.update_time || "--";
 
@@ -747,14 +669,17 @@
         }
         if (elements.opportunitySummary) {
             elements.opportunitySummary.textContent = candidateCount
-                ? `检测到 ${candidateCount} 条低于 0.88 的潜在机会。`
-                : "暂未发现满足当前标准的潜在机会。";
+                ? `检测到 ${candidateCount} 条比例不高于 0.80 的候选结果。`
+                : "暂未发现满足当前标准的候选结果。";
         }
         if (elements.filterSummary) {
             const activeCount = countActiveFilters(state.filters);
-            elements.filterSummary.textContent = activeCount
-                ? `已启用 ${activeCount} 项筛选条件，排序和筛选会同时生效。`
-                : "当前未启用任何筛选条件。";
+            elements.filterSummary.textContent = activeCount ? `当前使用 ${activeCount} 项筛选条件` : "当前使用默认筛选";
+        }
+        if (elements.filterPanelCopy) {
+            elements.filterPanelCopy.textContent = state.latestDate
+                ? `当前默认只显示 ${state.latestDate} 当天结果，可展开修改。`
+                : "默认按最新日期和业务阈值筛选，输入后立即生效。";
         }
 
         renderActiveFilterChips();
@@ -780,67 +705,29 @@
 
         const chips = [];
         if (state.filters.name) {
-            chips.push(renderChip(`名称: ${state.filters.name}`));
+            chips.push(renderChip(`名称 ${state.filters.name}`));
         }
         if (state.filters.buffPrice) {
-            chips.push(renderChip(`BUFF 出售价 ${describeOperatorFilter(state.filters.buffPrice)}`));
+            chips.push(renderChip(`BUFF 出售价(≥) ${state.filters.buffPrice.primary}`));
         }
         if (state.filters.steamPrice) {
-            chips.push(renderChip(`Steam 出售价 ${describeOperatorFilter(state.filters.steamPrice)}`));
+            chips.push(renderChip(`Steam 出售价(≥) ${state.filters.steamPrice.primary}`));
         }
         if (state.filters.sellRatio) {
-            chips.push(renderChip(`出售价比例 ${describeOperatorFilter(state.filters.sellRatio)}`));
+            chips.push(renderChip(`出售价比例(≤) ${state.filters.sellRatio.primary}`));
         }
         if (state.filters.volume) {
-            chips.push(renderChip(`Steam 成交量 ${describeOperatorFilter(state.filters.volume)}`));
+            chips.push(renderChip(`Steam 成交量(≥) ${state.filters.volume.primary}`));
         }
         if (state.filters.updateTime) {
-            chips.push(renderChip(`更新时间 ${describeDateFilter(state.filters.updateTime)}`));
+            chips.push(renderChip(`更新时间(≥) ${state.filters.updateTime.primary}`));
         }
 
-        elements.activeFilterChips.innerHTML = chips.length ? chips.join("") : '<span class="soft">当前没有筛选条件</span>';
+        elements.activeFilterChips.innerHTML = chips.length ? chips.join("") : '<span class="soft">正在使用默认筛选</span>';
     }
 
     function renderChip(text) {
         return `<span class="filter-chip">${escapeHtml(text)}</span>`;
-    }
-
-    function describeOperatorFilter(filter) {
-        if (!filter) {
-            return "";
-        }
-        if (filter.mode === "min") {
-            return `≥ ${filter.primary}`;
-        }
-        if (filter.mode === "max") {
-            return `≤ ${filter.primary}`;
-        }
-        if (filter.mode === "eq") {
-            return `= ${filter.primary}`;
-        }
-        if (filter.mode === "between") {
-            return `${filter.primary} - ${filter.secondary ?? filter.primary}`;
-        }
-        return "";
-    }
-
-    function describeDateFilter(filter) {
-        if (!filter) {
-            return "";
-        }
-        if (filter.mode === "after") {
-            return `晚于 ${filter.primary}`;
-        }
-        if (filter.mode === "before") {
-            return `早于 ${filter.primary}`;
-        }
-        if (filter.mode === "on") {
-            return `在 ${filter.primary}`;
-        }
-        if (filter.mode === "between") {
-            return `${filter.primary} - ${filter.secondary ?? filter.primary}`;
-        }
-        return "";
     }
 
     function getCurrentData() {
@@ -848,32 +735,45 @@
     }
 
     function getCurrentPageData() {
-        const data = getCurrentData();
         const start = (state.currentPage - 1) * state.itemsPerPage;
-        return data.slice(start, start + state.itemsPerPage);
+        return getCurrentData().slice(start, start + state.itemsPerPage);
     }
 
     function resetFilters() {
-        filterControlIds.forEach((id) => {
-            const element = document.getElementById(id);
-            if (!element) {
-                return;
-            }
-            if (element.tagName === "SELECT") {
-                element.selectedIndex = 0;
-            } else if (element.type === "date" || element.type === "number" || element.type === "text") {
-                element.value = "";
-            }
-        });
-
-        document.getElementById("filter-buff-price-mode").value = "min";
-        document.getElementById("filter-steam-price-mode").value = "min";
-        document.getElementById("filter-sell-ratio-mode").value = "max";
-        document.getElementById("filter-volume-mode").value = "min";
-        document.getElementById("filter-update-time-mode").value = "after";
-
-        syncOperatorVisibility();
+        setControlValue("filter-name", "");
+        setControlValue("filter-buff-price-primary", "20");
+        setControlValue("filter-steam-price-primary", "");
+        setControlValue("filter-sell-ratio-primary", "0.8");
+        setControlValue("filter-volume-primary", "20");
+        syncDefaultUpdateDate(true);
         applyFilters();
+    }
+
+    function syncDefaultUpdateDate(force) {
+        const field = document.getElementById("filter-update-time-primary");
+        if (!field || !state.latestDate) {
+            return;
+        }
+        if (force || !field.value) {
+            field.value = state.latestDate;
+        }
+    }
+
+    function toggleFiltersPanel() {
+        if (!elements.filtersBlock || !elements.toggleFiltersBtn) {
+            return;
+        }
+        state.filtersExpanded = !state.filtersExpanded;
+        elements.filtersBlock.hidden = !state.filtersExpanded;
+        elements.toggleFiltersBtn.textContent = state.filtersExpanded ? "收起筛选" : "展开筛选";
+        elements.toggleFiltersBtn.setAttribute("aria-expanded", state.filtersExpanded ? "true" : "false");
+    }
+
+    function setControlValue(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.value = value;
+        }
     }
 
     function getInputValue(id) {
@@ -927,7 +827,7 @@
         if (value === null) {
             return "warn";
         }
-        if (value < 0.88) {
+        if (value <= 0.8) {
             return "good";
         }
         if (value < 1.0) {
@@ -946,11 +846,11 @@
     }
 
     function renderTable() {
-        const pageData = getCurrentPageData();
         if (!elements.dataTableBody) {
             return;
         }
 
+        const pageData = getCurrentPageData();
         if (!pageData.length) {
             elements.dataTableBody.innerHTML = '<tr><td colspan="9"><div class="empty-state">当前条件下没有可展示的数据。</div></td></tr>';
             return;
@@ -993,8 +893,6 @@
             state.currentPage = totalPages;
         }
 
-        const info = `<div class="pagination-info">第 ${state.currentPage} / ${totalPages} 页，共 ${data.length} 条记录</div>`;
-
         const controls = [];
         controls.push(`<button class="btn btn-secondary" data-page-nav="${state.currentPage - 1}" ${state.currentPage === 1 ? "disabled" : ""}>上一页</button>`);
         getPageNumbers(state.currentPage, totalPages).forEach((page) => {
@@ -1007,7 +905,7 @@
         controls.push(`<button class="btn btn-secondary" data-page-nav="${state.currentPage + 1}" ${state.currentPage === totalPages ? "disabled" : ""}>下一页</button>`);
 
         elements.pagination.innerHTML = `
-            ${info}
+            <div class="pagination-info">第 ${state.currentPage} / ${totalPages} 页，共 ${data.length} 条记录</div>
             <div class="pagination-controls">${controls.join("")}</div>
             <div class="pagination-jump">
                 <input class="input" style="width:88px" id="page-jump-input" type="number" min="1" max="${totalPages}" value="${state.currentPage}">
@@ -1016,17 +914,12 @@
         `;
 
         elements.pagination.querySelectorAll("[data-page-nav]").forEach((button) => {
-            button.addEventListener("click", () => {
-                const nextPage = Number(button.dataset.pageNav);
-                goToPage(nextPage, totalPages);
-            });
+            button.addEventListener("click", () => goToPage(Number(button.dataset.pageNav), totalPages));
         });
-
         elements.pagination.querySelector("#page-jump-btn")?.addEventListener("click", () => {
             const input = elements.pagination.querySelector("#page-jump-input");
             goToPage(Number(input.value), totalPages);
         });
-
         elements.pagination.querySelector("#page-jump-input")?.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
                 goToPage(Number(event.currentTarget.value), totalPages);
@@ -1093,10 +986,7 @@
     }
 
     function parseDateOnly(value) {
-        if (!value) {
-            return null;
-        }
-        return String(value).slice(0, 10);
+        return value ? String(value).slice(0, 10) : null;
     }
 
     function escapeHtml(value) {

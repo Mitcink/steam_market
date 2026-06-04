@@ -36,6 +36,7 @@
         saveConfigBtn: document.getElementById("save-config-btn"),
         testConnectionBtn: document.getElementById("test-connection-btn"),
         resetFilterBtn: document.getElementById("reset-filters-btn"),
+        clearFilterBtn: document.getElementById("clear-filters-btn"),
         toggleFiltersBtn: document.getElementById("toggle-filters-btn"),
         filtersBlock: document.getElementById("filters-block"),
         filterPanelCopy: document.getElementById("filter-panel-copy"),
@@ -178,6 +179,9 @@
         }
         if (elements.resetFilterBtn) {
             elements.resetFilterBtn.addEventListener("click", resetFilters);
+        }
+        if (elements.clearFilterBtn) {
+            elements.clearFilterBtn.addEventListener("click", clearFilters);
         }
         if (elements.toggleFiltersBtn) {
             elements.toggleFiltersBtn.addEventListener("click", toggleFiltersPanel);
@@ -690,11 +694,21 @@
         if (filters.name) {
             count += 1;
         }
-        ["buffPrice", "steamPrice", "sellRatio", "volume", "updateTime"].forEach((key) => {
-            if (filters[key]) {
-                count += 1;
-            }
-        });
+        if (filters.buffPrice && filters.buffPrice.primary !== 20) {
+            count += 1;
+        }
+        if (filters.steamPrice) {
+            count += 1;
+        }
+        if (filters.sellRatio && filters.sellRatio.primary !== 0.8) {
+            count += 1;
+        }
+        if (filters.volume && filters.volume.primary !== 20) {
+            count += 1;
+        }
+        if (filters.updateTime && filters.updateTime.primary !== state.latestDate) {
+            count += 1;
+        }
         return count;
     }
 
@@ -707,19 +721,19 @@
         if (state.filters.name) {
             chips.push(renderChip(`名称 ${state.filters.name}`));
         }
-        if (state.filters.buffPrice) {
+        if (state.filters.buffPrice && state.filters.buffPrice.primary !== 20) {
             chips.push(renderChip(`BUFF 出售价(≥) ${state.filters.buffPrice.primary}`));
         }
         if (state.filters.steamPrice) {
             chips.push(renderChip(`Steam 出售价(≥) ${state.filters.steamPrice.primary}`));
         }
-        if (state.filters.sellRatio) {
+        if (state.filters.sellRatio && state.filters.sellRatio.primary !== 0.8) {
             chips.push(renderChip(`出售价比例(≤) ${state.filters.sellRatio.primary}`));
         }
-        if (state.filters.volume) {
+        if (state.filters.volume && state.filters.volume.primary !== 20) {
             chips.push(renderChip(`Steam 成交量(≥) ${state.filters.volume.primary}`));
         }
-        if (state.filters.updateTime) {
+        if (state.filters.updateTime && state.filters.updateTime.primary !== state.latestDate) {
             chips.push(renderChip(`更新时间(≥) ${state.filters.updateTime.primary}`));
         }
 
@@ -756,6 +770,16 @@
         applyFilters();
     }
 
+    function clearFilters() {
+        setControlValue("filter-name", "");
+        setControlValue("filter-buff-price-primary", "");
+        setControlValue("filter-steam-price-primary", "");
+        setControlValue("filter-sell-ratio-primary", "");
+        setControlValue("filter-volume-primary", "");
+        setControlValue("filter-update-time-primary", "");
+        applyFilters();
+    }
+
     function syncDefaultUpdateDate(force) {
         const field = document.getElementById("filter-update-time-primary");
         if (!field || !state.latestDate) {
@@ -772,6 +796,7 @@
         }
         state.filtersExpanded = !state.filtersExpanded;
         elements.filtersBlock.hidden = !state.filtersExpanded;
+        elements.filtersBlock.classList.toggle("is-collapsed", !state.filtersExpanded);
         elements.toggleFiltersBtn.textContent = state.filtersExpanded ? "收起筛选" : "展开筛选";
         elements.toggleFiltersBtn.setAttribute("aria-expanded", state.filtersExpanded ? "true" : "false");
     }

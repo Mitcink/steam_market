@@ -993,6 +993,10 @@ select {
     justify-content: center;
 }
 
+.filter-bar.is-collapsed {
+    display: none;
+}
+
 .field-filter-name {
     min-width: 180px;
     justify-items: center;

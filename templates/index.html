@@ -194,6 +194,27 @@
                         </div>
                     </div>
 
+                    <div class="settings-strip" style="margin-top: 12px;">
+                        <div class="settings-metrics settings-metrics-centered">
+                            <div class="field field-compact">
+                                <label for="buff-cookies">BUFF Cookies</label>
+                                <textarea class="textarea" id="buff-cookies" placeholder="建议直接粘贴完整 BUFF Cookie 字符串，便于批量下单使用"></textarea>
+                            </div>
+                            <div class="field field-compact">
+                                <label for="buff-steamid">BUFF 下单 SteamID64</label>
+                                <input class="input input-compact" type="text" id="buff-steamid" placeholder="7656119...">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="buff-pay-method">支付方式</label>
+                                <input class="input input-compact" type="number" id="buff-pay-method" min="1" value="44">
+                            </div>
+                            <div class="field field-compact">
+                                <label for="buff-allow-cooldown">允许冷却</label>
+                                <input class="input input-compact" type="number" id="buff-allow-cooldown" min="0" max="1" value="0">
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="token-grid">
                         <div class="card token-card">
                             <div class="card-body stack">
@@ -215,7 +236,11 @@
                                     </ol>
                                 </div>
                                 <div class="field">
+                                    <div class="inline-stat" id="buff-credential-status">未保存</div>
                                     <textarea class="textarea" id="buff-session" placeholder="在 Buff 登录后，将 session 值粘贴到这里"></textarea>
+                                </div>
+                                <div class="inline-actions token-actions">
+                                    <button class="btn btn-ghost" type="button" id="clear-buff-credential-btn">清除 BUFF 凭证</button>
                                 </div>
                             </div>
                         </div>
@@ -240,7 +265,11 @@
                                     </ol>
                                 </div>
                                 <div class="field">
+                                    <div class="inline-stat" id="steam-credential-status">未保存</div>
                                     <textarea class="textarea" id="steam-cookies" placeholder="登录 Steam 后，将需要的 Cookie 字符串粘贴到这里"></textarea>
+                                </div>
+                                <div class="inline-actions token-actions">
+                                    <button class="btn btn-ghost" type="button" id="clear-steam-credential-btn">清除 Steam 凭证</button>
                                 </div>
                             </div>
                         </div>
@@ -328,13 +357,29 @@
                             <h3>数据表格</h3>
                             <p>已经移除求购价与求购价比例，只保留实际需要的市场数据。</p>
                         </div>
+                        {% if is_admin %}
+                        <div class="inline-actions">
+                            <span class="inline-stat">已选中 <strong id="selected-count">0</strong> 项</span>
+                            <button class="btn btn-secondary" type="button" id="preview-buff-buy-btn">批量预检</button>
+                            <button class="btn btn-primary" type="button" id="execute-buff-buy-btn">BUFF 批量下单</button>
+                        </div>
+                        {% endif %}
                     </div>
+
+                    {% if is_admin %}
+                    <div class="terminal" id="buff-buy-log-box" style="margin-bottom: 18px;">
+                        <p class="log-info">等待批量预检或批量下单。</p>
+                    </div>
+                    {% endif %}
 
                     <div class="table-shell">
                         <div class="table-wrap">
                             <table class="table">
                                 <thead>
                                     <tr>
+                                        {% if is_admin %}
+                                        <th><input type="checkbox" id="select-all-items" aria-label="全选当前页"></th>
+                                        {% endif %}
                                         <th><button type="button" data-sort-key="name">名称</button></th>
                                         <th>链接</th>
                                         <th><button type="button" data-sort-key="buff_sell_price">BUFF 出售价</button></th>
@@ -347,7 +392,7 @@
                                     </tr>
                                 </thead>
                                 <tbody id="data-table-body">
-                                    <tr><td colspan="9"><div class="empty-state">正在加载数据...</div></td></tr>
+                                    <tr><td colspan="{% if is_admin %}10{% else %}9{% endif %}"><div class="empty-state">正在加载数据...</div></td></tr>
                                 </tbody>
                             </table>
                         </div>

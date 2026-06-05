@@ -23,6 +23,10 @@
         sectionObserver: null,
         latestDate: "",
         filtersExpanded: true,
+        credentialStatus: null,
+        selectedItemIds: new Set(),
+        previewedBuyItems: [],
+        buffBuySettings: {},
     };
 
     const elements = {
@@ -35,6 +39,11 @@
         clearButtons: Array.from(document.querySelectorAll("[data-clear-data]")),
         saveConfigBtn: document.getElementById("save-config-btn"),
         testConnectionBtn: document.getElementById("test-connection-btn"),
+        clearBuffCredentialBtn: document.getElementById("clear-buff-credential-btn"),
+        clearSteamCredentialBtn: document.getElementById("clear-steam-credential-btn"),
+        previewBuffBuyBtn: document.getElementById("preview-buff-buy-btn"),
+        executeBuffBuyBtn: document.getElementById("execute-buff-buy-btn"),
+        selectAllItems: document.getElementById("select-all-items"),
         resetFilterBtn: document.getElementById("reset-filters-btn"),
         clearFilterBtn: document.getElementById("clear-filters-btn"),
         toggleFiltersBtn: document.getElementById("toggle-filters-btn"),
@@ -54,17 +63,22 @@
         opportunitySummary: document.getElementById("opportunity-summary"),
         filterSummary: document.getElementById("filter-summary"),
         activeFilterChips: document.getElementById("active-filter-chips"),
+        buffCredentialStatus: document.getElementById("buff-credential-status"),
+        steamCredentialStatus: document.getElementById("steam-credential-status"),
+        selectedCount: document.getElementById("selected-count"),
+        buffBuyLog: document.getElementById("buff-buy-log-box"),
     };
 
     const configFieldIds = [
         "proxy-url",
-        "buff-session",
-        "steam-cookies",
         "max-threads",
         "min-sell-count",
         "min-sell-price",
         "max-sell-price",
         "web-auth",
+        "buff-steamid",
+        "buff-pay-method",
+        "buff-allow-cooldown",
     ];
 
     const filterControlIds = [
@@ -78,14 +92,15 @@
 
     document.addEventListener("DOMContentLoaded", init);
 
-    function init() {
+    async function init() {
         bindSectionNavigation();
         bindButtons();
         bindSorting();
         setupAutoSave();
         setupFilterControls();
         setupExternalActions();
-        loadConfig();
+        await loadConfig();
+        await loadBuffBuySettings();
         activateInitialSection();
         resetFilters();
         checkCrawlerStatus();
@@ -172,10 +187,27 @@
         }
         elements.clearButtons.forEach((button) => button.addEventListener("click", clearData));
         if (elements.saveConfigBtn) {
-            elements.saveConfigBtn.addEventListener("click", () => saveConfig(getFormConfig(), true));
+            elements.saveConfigBtn.addEventListener("click", async () => {
+                await saveConfig(getFormConfig(), true);
+            });
         }
         if (elements.testConnectionBtn) {
             elements.testConnectionBtn.addEventListener("click", testConnection);
+        }
+        if (elements.clearBuffCredentialBtn) {
+            elements.clearBuffCredentialBtn.addEventListener("click", () => clearCredentials(["buff_session", "buff_cookies"]));
+        }
+        if (elements.clearSteamCredentialBtn) {
+            elements.clearSteamCredentialBtn.addEventListener("click", () => clearCredentials(["steam_cookies"]));
+        }
+        if (elements.previewBuffBuyBtn) {
+            elements.previewBuffBuyBtn.addEventListener("click", previewBuffBuys);
+        }
+        if (elements.executeBuffBuyBtn) {
+            elements.executeBuffBuyBtn.addEventListener("click", executeBuffBuys);
+        }
+        if (elements.selectAllItems) {
+            elements.selectAllItems.addEventListener("change", toggleSelectAllCurrentPage);
         }
         if (elements.resetFilterBtn) {
             elements.resetFilterBtn.addEventListener("click", resetFilters);
@@ -215,7 +247,10 @@
             if (!element) {
                 return;
             }
-            const handler = () => saveConfig(getFormConfig(), false);
+            const handler = () => {
+                window.localStorage.setItem(getStorageKey(), JSON.stringify(splitLocalConfig(getFormConfig())));
+                updateOverviewCards();
+            };
             element.addEventListener(element.type === "checkbox" ? "change" : "input", handler);
         });
     }
@@ -269,6 +304,7 @@
         return {
             proxy_url: document.getElementById("proxy-url")?.value.trim() || "",
             buff_session: document.getElementById("buff-session")?.value.trim() || "",
+            buff_cookies: document.getElementById("buff-cookies")?.value.trim() || "",
             steam_cookies: document.getElementById("steam-cookies")?.value.trim() || "",
             max_threads: document.getElementById("max-threads")?.value || "2",
             game_type: document.querySelector('input[name="game_type"]:checked')?.value || "CSGO",
@@ -279,35 +315,74 @@
         };
     }
 
-    function saveConfig(config, shouldToast) {
-        window.localStorage.setItem(getStorageKey(), JSON.stringify(config));
-        if (shouldToast) {
-            writeLog(elements.crawlerLog, "success", "配置已保存到本地浏览器。");
+    function splitLocalConfig(config) {
+        return {
+            proxy_url: config.proxy_url,
+            max_threads: config.max_threads,
+            game_type: config.game_type,
+            min_sell_price: config.min_sell_price,
+            max_sell_price: config.max_sell_price,
+            min_sell_count: config.min_sell_count,
+            web_auth: config.web_auth,
+        };
+    }
+
+    function getBuffBuySettings() {
+        return {
+            steamid: document.getElementById("buff-steamid")?.value.trim() || "",
+            pay_method: document.getElementById("buff-pay-method")?.value.trim() || "44",
+            allow_tradable_cooldown: document.getElementById("buff-allow-cooldown")?.value.trim() || "0",
+        };
+    }
+
+    async function saveConfig(config, shouldToast) {
+        window.localStorage.setItem(getStorageKey(), JSON.stringify(splitLocalConfig(config)));
+        try {
+            const result = await fetchJson("/api/config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(config),
+            });
+            if (!result) {
+                return;
+            }
+            applyServerConfig(result.json.config);
+            if (shouldToast) {
+                writeLog(elements.crawlerLog, "success", result.json.message || "配置已保存到服务器。");
+            }
+        } catch (error) {
+            writeLog(elements.crawlerLog, "error", `保存配置失败: ${error.message}`);
         }
+        clearCredentialInputs();
         updateOverviewCards();
     }
 
-    function loadConfig() {
+    async function loadConfig() {
         const raw = window.localStorage.getItem(getStorageKey());
-        if (!raw) {
-            updateOverviewCards();
-            return;
+        if (raw) {
+            try {
+                const config = JSON.parse(raw);
+                applyConfigToForm(config);
+            } catch (error) {
+                console.error("Failed to parse saved config", error);
+            }
         }
 
         try {
-            const config = JSON.parse(raw);
-            applyConfigToForm(config);
-            updateOverviewCards();
+            const result = await fetchJson("/api/config");
+            if (result?.json?.config) {
+                applyServerConfig(result.json.config);
+            }
         } catch (error) {
-            console.error("Failed to parse saved config", error);
+            writeLog(elements.crawlerLog, "error", `加载服务器配置失败: ${error.message}`);
         }
+        clearCredentialInputs();
+        updateOverviewCards();
     }
 
     function applyConfigToForm(config) {
         const mapping = {
             "proxy-url": config.proxy_url,
-            "buff-session": config.buff_session,
-            "steam-cookies": config.steam_cookies,
             "max-threads": config.max_threads,
             "min-sell-count": config.min_sell_count,
             "min-sell-price": config.min_sell_price,
@@ -329,6 +404,88 @@
         const radio = document.querySelector(`input[name="game_type"][value="${config.game_type || "CSGO"}"]`);
         if (radio) {
             radio.checked = true;
+        }
+    }
+
+    async function loadBuffBuySettings() {
+        if (!isAdmin) {
+            return;
+        }
+        try {
+            const result = await fetchJson("/api/buff_buy_settings");
+            if (!result?.json?.settings) {
+                return;
+            }
+            state.buffBuySettings = result.json.settings;
+            applyBuffBuySettings(result.json.settings);
+        } catch (error) {
+            writeLog(elements.crawlerLog, "error", `加载 BUFF 购买设置失败: ${error.message}`);
+        }
+    }
+
+    function applyBuffBuySettings(settings) {
+        const steamid = document.getElementById("buff-steamid");
+        const payMethod = document.getElementById("buff-pay-method");
+        const allowCooldown = document.getElementById("buff-allow-cooldown");
+        if (steamid && settings.steamid) {
+            steamid.value = settings.steamid;
+        }
+        if (payMethod && settings.pay_method) {
+            payMethod.value = settings.pay_method;
+        }
+        if (allowCooldown && settings.allow_tradable_cooldown !== undefined) {
+            allowCooldown.value = settings.allow_tradable_cooldown;
+        }
+    }
+
+    async function saveBuffBuySettings() {
+        const settings = getBuffBuySettings();
+        const result = await fetchJson("/api/buff_buy_settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(settings),
+        });
+        if (result?.json?.settings) {
+            state.buffBuySettings = result.json.settings;
+        }
+        return settings;
+    }
+
+    function applyServerConfig(payload) {
+        if (!payload) {
+            return;
+        }
+        state.credentialStatus = payload;
+        if (payload.settings) {
+            applyConfigToForm(payload.settings);
+            window.localStorage.setItem(getStorageKey(), JSON.stringify(splitLocalConfig(payload.settings)));
+        }
+        renderCredentialStatus();
+    }
+
+    function renderCredentialStatus() {
+        if (elements.buffCredentialStatus) {
+            const text = state.credentialStatus?.buff?.configured ? "已保存到服务器" : "未保存";
+            elements.buffCredentialStatus.textContent = text;
+        }
+        if (elements.steamCredentialStatus) {
+            const text = state.credentialStatus?.steam?.configured ? "已保存到服务器" : "未保存";
+            elements.steamCredentialStatus.textContent = text;
+        }
+    }
+
+    function clearCredentialInputs() {
+        const buff = document.getElementById("buff-session");
+        const buffCookies = document.getElementById("buff-cookies");
+        const steam = document.getElementById("steam-cookies");
+        if (buff) {
+            buff.value = "";
+        }
+        if (buffCookies) {
+            buffCookies.value = "";
+        }
+        if (steam) {
+            steam.value = "";
         }
     }
 
@@ -374,6 +531,7 @@
         elements.testConnectionBtn.disabled = true;
 
         try {
+            await saveConfig(config, false);
             const result = await fetchJson("/api/test_connection", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -408,7 +566,7 @@
 
     async function startCrawler() {
         const config = getFormConfig();
-        saveConfig(config, false);
+        await saveConfig(config, false);
         writeLog(elements.crawlerLog, "info", "提交启动请求...");
         elements.crawlerToggle.disabled = true;
 
@@ -502,6 +660,163 @@
         }
     }
 
+    async function clearCredentials(fields) {
+        if (!window.confirm("确定要清除已保存的站点凭证吗？")) {
+            return;
+        }
+
+        try {
+            const result = await fetchJson("/api/config/credentials", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fields }),
+            });
+            if (!result) {
+                return;
+            }
+            applyServerConfig(result.json.config);
+            clearCredentialInputs();
+            writeLog(elements.crawlerLog, "success", result.json.message || "凭证已清除。");
+        } catch (error) {
+            writeLog(elements.crawlerLog, "error", `清除凭证失败: ${error.message}`);
+        }
+    }
+
+    function getSelectedItems() {
+        return state.allData.filter((item) => state.selectedItemIds.has(String(item.buff_id)));
+    }
+
+    function toggleItemSelection(itemId, checked) {
+        const normalized = String(itemId);
+        if (checked) {
+            state.selectedItemIds.add(normalized);
+        } else {
+            state.selectedItemIds.delete(normalized);
+        }
+        updateSelectionSummary();
+        syncSelectAllCheckbox();
+    }
+
+    function toggleSelectAllCurrentPage() {
+        const checked = Boolean(elements.selectAllItems?.checked);
+        getCurrentPageData().forEach((item) => {
+            const normalized = String(item.buff_id);
+            if (checked) {
+                state.selectedItemIds.add(normalized);
+            } else {
+                state.selectedItemIds.delete(normalized);
+            }
+        });
+        renderTable();
+        updateSelectionSummary();
+    }
+
+    function updateSelectionSummary() {
+        if (elements.selectedCount) {
+            elements.selectedCount.textContent = String(state.selectedItemIds.size);
+        }
+    }
+
+    function syncSelectAllCheckbox() {
+        if (!elements.selectAllItems) {
+            return;
+        }
+        const pageData = getCurrentPageData();
+        if (!pageData.length) {
+            elements.selectAllItems.checked = false;
+            elements.selectAllItems.indeterminate = false;
+            return;
+        }
+        const selectedOnPage = pageData.filter((item) => state.selectedItemIds.has(String(item.buff_id))).length;
+        elements.selectAllItems.checked = selectedOnPage === pageData.length;
+        elements.selectAllItems.indeterminate = selectedOnPage > 0 && selectedOnPage < pageData.length;
+    }
+
+    async function previewBuffBuys() {
+        const items = getSelectedItems();
+        if (!items.length) {
+            writeLog(elements.buffBuyLog, "warn", "请先勾选至少一个饰品。");
+            return;
+        }
+
+        try {
+            await saveConfig(getFormConfig(), false);
+            const buySettings = await saveBuffBuySettings();
+            writeLog(elements.buffBuyLog, "info", `开始预检 ${items.length} 个饰品...`);
+            const result = await fetchJson("/api/buff/buy_preview_batch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    config: getFormConfig(),
+                    buy_settings: buySettings,
+                    items: items.map((item) => ({
+                        buff_id: item.buff_id,
+                        goods_id: item.buff_id,
+                        name: item.name,
+                        game_type: item.kind,
+                        target_price: item.buff_sell_price,
+                        buff_sell_price: item.buff_sell_price,
+                    })),
+                }),
+            });
+            if (!result) {
+                return;
+            }
+            state.previewedBuyItems = result.json.data || [];
+            const successCount = state.previewedBuyItems.filter((item) => item.success).length;
+            writeLog(elements.buffBuyLog, successCount ? "success" : "warn", `预检完成: ${successCount}/${items.length} 项可下单。`);
+            state.previewedBuyItems.forEach((item) => {
+                if (item.success) {
+                    writeLog(elements.buffBuyLog, "info", `${item.name}: 卖单 ${item.sell_order_id} / ¥${Number(item.price).toFixed(2)} / ${item.pay_method_description || "支付方式已确认"}`);
+                } else {
+                    writeLog(elements.buffBuyLog, "error", `${item.name || item.goods_id}: ${item.error}`);
+                }
+            });
+        } catch (error) {
+            writeLog(elements.buffBuyLog, "error", `批量预检失败: ${error.message}`);
+        }
+    }
+
+    async function executeBuffBuys() {
+        const buyableItems = (state.previewedBuyItems || []).filter((item) => item.success);
+        if (!buyableItems.length) {
+            writeLog(elements.buffBuyLog, "warn", "没有可执行的预检结果，请先批量预检。");
+            return;
+        }
+        if (!window.confirm(`确定要提交 ${buyableItems.length} 个 BUFF 购买请求吗？`)) {
+            return;
+        }
+
+        try {
+            const buySettings = await saveBuffBuySettings();
+            writeLog(elements.buffBuyLog, "info", `开始提交 ${buyableItems.length} 个购买请求...`);
+            const result = await fetchJson("/api/buff/buy_batch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    config: getFormConfig(),
+                    buy_settings: buySettings,
+                    items: buyableItems,
+                }),
+            });
+            if (!result) {
+                return;
+            }
+            const rows = result.json.data || [];
+            const successCount = rows.filter((item) => item.success).length;
+            writeLog(elements.buffBuyLog, successCount ? "success" : "warn", `批量下单完成: ${successCount}/${buyableItems.length} 成功。`);
+            rows.forEach((item) => {
+                if (item.success) {
+                    writeLog(elements.buffBuyLog, "success", `${item.name}: 下单成功，保护期提醒时间 ${item.release_at_utc}`);
+                } else {
+                    writeLog(elements.buffBuyLog, "error", `${item.name || item.goods_id}: ${item.error}`);
+                }
+            });
+        } catch (error) {
+            writeLog(elements.buffBuyLog, "error", `批量下单失败: ${error.message}`);
+        }
+    }
+
     async function clearData() {
         if (!window.confirm("确定要清空数据库中的全部市场数据吗？")) {
             return;
@@ -573,6 +888,7 @@
         updateDashboardMetrics();
         renderTable();
         renderPagination();
+        syncSelectAllCheckbox();
     }
 
     function rebuildViewData() {
@@ -884,14 +1200,16 @@
 
         const pageData = getCurrentPageData();
         if (!pageData.length) {
-            elements.dataTableBody.innerHTML = '<tr><td colspan="9"><div class="empty-state">当前条件下没有可展示的数据。</div></td></tr>';
+            elements.dataTableBody.innerHTML = `<tr><td colspan="${isAdmin ? 10 : 9}"><div class="empty-state">当前条件下没有可展示的数据。</div></td></tr>`;
             return;
         }
 
         elements.dataTableBody.innerHTML = pageData.map((item) => {
             const sellRatio = computeSellRatio(item);
+            const checked = state.selectedItemIds.has(String(item.buff_id)) ? "checked" : "";
             return `
                 <tr>
+                    ${isAdmin ? `<td><input type="checkbox" class="row-selector" data-item-id="${escapeHtml(String(item.buff_id))}" ${checked}></td>` : ""}
                     <td>
                         <strong>${escapeHtml(item.name || "--")}</strong>
                         <div class="soft">${escapeHtml(item.kind || "--")}</div>
@@ -912,6 +1230,14 @@
                 </tr>
             `;
         }).join("");
+
+        elements.dataTableBody.querySelectorAll(".row-selector").forEach((checkbox) => {
+            checkbox.addEventListener("change", () => {
+                toggleItemSelection(checkbox.dataset.itemId, checkbox.checked);
+            });
+        });
+        syncSelectAllCheckbox();
+        updateSelectionSummary();
     }
 
     function renderPagination() {
@@ -964,6 +1290,7 @@
         updateDashboardMetrics();
         renderTable();
         renderPagination();
+        syncSelectAllCheckbox();
     }
 
     function getPageNumbers(current, total) {

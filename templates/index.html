@@ -155,7 +155,7 @@
                 <div class="card-header">
                     <div>
                         <h3 class="card-title">抓取配置</h3>
-                        <p class="card-subtitle">配置自动保存在浏览器本地。启动抓取时直接读取这组参数。</p>
+                        <p class="card-subtitle">抓取参数保存在当前账户下；站点凭证会加密保存在服务器，不再留在浏览器本地。</p>
                     </div>
                     <button class="btn btn-secondary" type="button" id="save-config-btn">立即保存</button>
                 </div>
@@ -194,33 +194,12 @@
                         </div>
                     </div>
 
-                    <div class="settings-strip" style="margin-top: 12px;">
-                        <div class="settings-metrics settings-metrics-centered">
-                            <div class="field field-compact">
-                                <label for="buff-cookies">BUFF Cookies</label>
-                                <textarea class="textarea" id="buff-cookies" placeholder="建议直接粘贴完整 BUFF Cookie 字符串，便于批量下单使用"></textarea>
-                            </div>
-                            <div class="field field-compact">
-                                <label for="buff-steamid">BUFF 下单 SteamID64</label>
-                                <input class="input input-compact" type="text" id="buff-steamid" placeholder="7656119...">
-                            </div>
-                            <div class="field field-compact">
-                                <label for="buff-pay-method">支付方式</label>
-                                <input class="input input-compact" type="number" id="buff-pay-method" min="1" value="44">
-                            </div>
-                            <div class="field field-compact">
-                                <label for="buff-allow-cooldown">允许冷却</label>
-                                <input class="input input-compact" type="number" id="buff-allow-cooldown" min="0" max="1" value="0">
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="token-grid">
                         <div class="card token-card">
                             <div class="card-body stack">
                                 <div>
-                                    <h4 class="card-title">BUFF Session</h4>
-                                    <p class="card-subtitle">浏览器无法直接读取第三方站点的受保护 Cookie，这里提供一键跳转和填写入口。</p>
+                                    <h4 class="card-title">BUFF 登录凭证</h4>
+                                    <p class="card-subtitle">抓取行情时 `session` 就能工作；如果要批量下单，建议直接填写完整 BUFF Cookie 字符串，让系统能拿到 `session`、`csrf_token` 等字段。</p>
                                 </div>
                                 <div class="inline-actions token-actions">
                                     <button class="btn btn-secondary" type="button" data-open-external="https://buff.163.com">打开 Buff</button>
@@ -238,6 +217,12 @@
                                 <div class="field">
                                     <div class="inline-stat" id="buff-credential-status">未保存</div>
                                     <textarea class="textarea" id="buff-session" placeholder="在 Buff 登录后，将 session 值粘贴到这里"></textarea>
+                                    <span class="field-hint">兼容旧抓取方式。只填这个通常足够抓行情，但不一定足够完成批量下单。</span>
+                                </div>
+                                <div class="field">
+                                    <label for="buff-cookies">完整 BUFF Cookie 字符串</label>
+                                    <textarea class="textarea" id="buff-cookies" placeholder="推荐：直接粘贴浏览器里 buff.163.com 的完整 Cookie 字符串"></textarea>
+                                    <span class="field-hint">推荐给批量下单使用。至少应包含 `session`，最好同时包含 `csrf_token` 等字段。</span>
                                 </div>
                                 <div class="inline-actions token-actions">
                                     <button class="btn btn-ghost" type="button" id="clear-buff-credential-btn">清除 BUFF 凭证</button>
@@ -249,7 +234,7 @@
                             <div class="card-body stack">
                                 <div>
                                     <h4 class="card-title">Steam Cookies</h4>
-                                    <p class="card-subtitle">同样受浏览器同源与 HttpOnly 限制，这里提供一键打开 Steam 与复制说明。</p>
+                                    <p class="card-subtitle">这里只用于抓取 Steam 市场价格和成交量。如果你当前只做 BUFF 批量下单，可以先不填。</p>
                                 </div>
                                 <div class="inline-actions token-actions">
                                     <button class="btn btn-secondary" type="button" data-open-external="https://steamcommunity.com/market/">打开 Steam 市场</button>
@@ -352,10 +337,45 @@
                         </div>
                     </section>
 
+                    {% if is_admin %}
+                    <article class="trade-ops-panel">
+                        <div class="trade-ops-copy">
+                            <div class="eyebrow">BUFF Batch Buy</div>
+                            <h3>批量下单参数</h3>
+                            <p>这里填的是 BUFF 下单需要的业务参数，不是抓取参数。点击“批量预检”或“BUFF 批量下单”时，这些值会一起提交并自动保存。</p>
+                            <div class="trade-ops-facts">
+                                <span class="trade-pill">需要完整 BUFF Cookies</span>
+                                <span class="trade-pill">需要 SteamID64</span>
+                                <span class="trade-pill">需要 pay_method</span>
+                            </div>
+                        </div>
+                        <div class="trade-ops-grid">
+                            <div class="field">
+                                <label for="buff-steamid">收货 SteamID64</label>
+                                <input class="input" type="text" id="buff-steamid" placeholder="例如：76561198101390929">
+                                <span class="field-hint">填写你收货用的 Steam 账号 64 位数字 ID。就是你抓到的 `steamid` 参数，或 Steam 个人资料 / 交易报价链接里那个以 `7656119...` 开头的长数字。</span>
+                            </div>
+                            <div class="field">
+                                <label for="buff-pay-method">支付方式编号</label>
+                                <input class="input" type="text" id="buff-pay-method" placeholder="例如：44">
+                                <span class="field-hint">这里填 BUFF 请求里的 `pay_method` 数字。比如你抓到的是 `44`，就填 `44`。这不是银行卡尾号，也不是付款金额。</span>
+                            </div>
+                            <div class="field">
+                                <label for="buff-allow-cooldown">是否接受交易冷却</label>
+                                <select class="input" id="buff-allow-cooldown">
+                                    <option value="0">不接受，只买可立即交易的饰品</option>
+                                    <option value="1">接受，允许买到带交易冷却的饰品</option>
+                                </select>
+                                <span class="field-hint">对应接口里的 `allow_tradable_cooldown`。通常保持 `0` 更稳，只有你明确接受带冷却的饰品时再选 `1`。</span>
+                            </div>
+                        </div>
+                    </article>
+                    {% endif %}
+
                     <div class="toolbar" style="margin-bottom: 18px;">
                         <div class="toolbar-copy">
                             <h3>数据表格</h3>
-                            <p>已经移除求购价与求购价比例，只保留实际需要的市场数据。</p>
+                            <p>先勾选目标饰品，再做批量预检。系统会去 BUFF 找当前可买卖单，并按你的参数尝试批量下单。</p>
                         </div>
                         {% if is_admin %}
                         <div class="inline-actions">

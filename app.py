@@ -88,6 +88,7 @@ STALE_DATA_WINDOW_DAYS = 15
 CREDENTIAL_CONFIG_KEY = "crawler_credentials_v1"
 NON_SECRET_CONFIG_KEY = "crawler_settings_v1"
 BUFF_BUY_SETTINGS_KEY = "buff_buy_settings_v1"
+CREDENTIAL_HEALTH_KEY = "crawler_credentials_health_v1"
 
 
 def _derive_encryption_key():
@@ -400,6 +401,7 @@ def merge_runtime_config(request_config):
 def build_credentials_status():
     saved_settings = get_saved_settings()
     saved_credentials = get_saved_credentials()
+    credential_health = get_credential_health()
     has_buff = bool(saved_credentials.get("buff_session") or saved_credentials.get("buff_cookies"))
     has_steam = bool(saved_credentials.get("steam_cookies"))
 
@@ -407,10 +409,12 @@ def build_credentials_status():
         "buff": {
             "configured": has_buff,
             "masked": "已保存" if has_buff else "未保存",
+            "health": credential_health.get("buff", {}),
         },
         "steam": {
             "configured": has_steam,
             "masked": "已保存" if has_steam else "未保存",
+            "health": credential_health.get("steam", {}),
         },
         "settings": {
             "proxy_url": saved_settings.get("proxy_url", ""),
@@ -486,6 +490,25 @@ def save_buff_buy_settings(settings):
         description="BUFF batch buy settings",
     )
     return filtered
+
+
+def get_credential_health():
+    raw_value = get_system_config(CREDENTIAL_HEALTH_KEY, default="")
+    if not raw_value:
+        return {}
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_credential_health(health):
+    set_system_config(
+        CREDENTIAL_HEALTH_KEY,
+        json.dumps(health, ensure_ascii=False),
+        description="Credential health state",
+    )
+    return health
 
 
 # ===================== 装饰器 =====================
@@ -1418,9 +1441,24 @@ def api_test_connection():
             proxy=effective_proxy
         )
 
+        checked_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        save_credential_health({
+            "buff": {
+                "status": "healthy" if buff_success else "expired_or_invalid",
+                "checked_at": checked_at,
+                "message": buff_msg,
+            },
+            "steam": {
+                "status": "healthy" if steam_success else "expired_or_invalid",
+                "checked_at": checked_at,
+                "message": steam_msg,
+            },
+        })
+
         return jsonify({
             'buff': {'success': buff_success, 'message': buff_msg},
-            'steam': {'success': steam_success, 'message': steam_msg}
+            'steam': {'success': steam_success, 'message': steam_msg},
+            'config': build_credentials_status(),
         })
 
     except Exception as e:

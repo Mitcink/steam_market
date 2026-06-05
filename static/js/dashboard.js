@@ -337,6 +337,7 @@
 
     async function saveConfig(config, shouldToast) {
         window.localStorage.setItem(getStorageKey(), JSON.stringify(splitLocalConfig(config)));
+        let saved = false;
         try {
             const result = await fetchJson("/api/config", {
                 method: "POST",
@@ -347,13 +348,16 @@
                 return;
             }
             applyServerConfig(result.json.config);
+            saved = true;
             if (shouldToast) {
-                writeLog(elements.crawlerLog, "success", result.json.message || "配置已保存到服务器。");
+                writeLog(elements.crawlerLog, "success", result.json.message || "配置已保存到服务器。站点凭证不会在页面回显。");
             }
         } catch (error) {
             writeLog(elements.crawlerLog, "error", `保存配置失败: ${error.message}`);
         }
-        clearCredentialInputs();
+        if (saved) {
+            clearCredentialInputs();
+        }
         updateOverviewCards();
     }
 
@@ -465,13 +469,28 @@
 
     function renderCredentialStatus() {
         if (elements.buffCredentialStatus) {
-            const text = state.credentialStatus?.buff?.configured ? "已保存到服务器" : "未保存";
+            const text = getCredentialStatusText(state.credentialStatus?.buff);
             elements.buffCredentialStatus.textContent = text;
         }
         if (elements.steamCredentialStatus) {
-            const text = state.credentialStatus?.steam?.configured ? "已保存到服务器" : "未保存";
+            const text = getCredentialStatusText(state.credentialStatus?.steam);
             elements.steamCredentialStatus.textContent = text;
         }
+        updateProtectedFieldPlaceholders();
+    }
+
+    function getCredentialStatusText(entry) {
+        if (!entry?.configured) {
+            return "未保存";
+        }
+        const health = entry.health || {};
+        if (health.status === "healthy" && health.checked_at) {
+            return `已保存 · 最近检测通过 (${health.checked_at})`;
+        }
+        if (health.status === "expired_or_invalid" && health.checked_at) {
+            return `已保存 · 最近检测失败，可能已过期 (${health.checked_at})`;
+        }
+        return "已保存 · 待检测";
     }
 
     function clearCredentialInputs() {
@@ -487,6 +506,39 @@
         if (steam) {
             steam.value = "";
         }
+        updateProtectedFieldPlaceholders();
+    }
+
+    function updateProtectedFieldPlaceholders() {
+        setProtectedFieldPlaceholder(
+            "buff-session",
+            state.credentialStatus?.buff?.configured,
+            "在 Buff 登录后，将 session 值粘贴到这里",
+            "已保存到服务器；如需替换，直接粘贴新的 session",
+        );
+        setProtectedFieldPlaceholder(
+            "buff-cookies",
+            state.credentialStatus?.buff?.configured,
+            "推荐：直接粘贴浏览器里 buff.163.com 的完整 Cookie 字符串",
+            "已保存到服务器；如需替换，重新粘贴完整 BUFF Cookie 字符串",
+        );
+        setProtectedFieldPlaceholder(
+            "steam-cookies",
+            state.credentialStatus?.steam?.configured,
+            "登录 Steam 后，将需要的 Cookie 字符串粘贴到这里",
+            "已保存到服务器；如需替换，重新粘贴新的 Steam Cookie 字符串",
+        );
+    }
+
+    function setProtectedFieldPlaceholder(fieldId, configured, emptyPlaceholder, savedPlaceholder) {
+        const field = document.getElementById(fieldId);
+        if (!field) {
+            return;
+        }
+        if (field.value.trim()) {
+            return;
+        }
+        field.placeholder = configured ? savedPlaceholder : emptyPlaceholder;
     }
 
     function updateOverviewCards() {
@@ -547,6 +599,9 @@
                 return;
             }
 
+            if (json.config) {
+                applyServerConfig(json.config);
+            }
             writeLog(elements.testLog, json.steam?.success ? "success" : "error", `Steam: ${json.steam?.message || "无返回"}`);
             writeLog(elements.testLog, json.buff?.success ? "success" : "error", `Buff: ${json.buff?.message || "无返回"}`);
         } catch (error) {

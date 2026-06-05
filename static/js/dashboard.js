@@ -39,6 +39,7 @@
         clearButtons: Array.from(document.querySelectorAll("[data-clear-data]")),
         saveConfigBtn: document.getElementById("save-config-btn"),
         testConnectionBtn: document.getElementById("test-connection-btn"),
+        testCredentialBtn: document.getElementById("test-credential-btn"),
         clearBuffCredentialBtn: document.getElementById("clear-buff-credential-btn"),
         clearSteamCredentialBtn: document.getElementById("clear-steam-credential-btn"),
         previewBuffBuyBtn: document.getElementById("preview-buff-buy-btn"),
@@ -193,6 +194,9 @@
         }
         if (elements.testConnectionBtn) {
             elements.testConnectionBtn.addEventListener("click", testConnection);
+        }
+        if (elements.testCredentialBtn) {
+            elements.testCredentialBtn.addEventListener("click", testConnection);
         }
         if (elements.clearBuffCredentialBtn) {
             elements.clearBuffCredentialBtn.addEventListener("click", () => clearCredentials(["buff_auth"]));

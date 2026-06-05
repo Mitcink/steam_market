@@ -299,18 +299,16 @@ def get_saved_credentials():
         return {}
 
     return {
-        "buff_session": _decrypt_value(encrypted_payload.get("buff_session", "")),
-        "buff_cookies": _decrypt_value(encrypted_payload.get("buff_cookies", "")),
+        "buff_auth": _decrypt_value(encrypted_payload.get("buff_auth", "")),
         "steam_cookies": _decrypt_value(encrypted_payload.get("steam_cookies", "")),
         "updated_at": encrypted_payload.get("updated_at"),
     }
 
 
-def save_credentials(buff_session=None, buff_cookies=None, steam_cookies=None):
+def save_credentials(buff_auth=None, steam_cookies=None):
     current = get_saved_credentials()
     next_payload = {
-        "buff_session": _encrypt_value(buff_session if buff_session is not None else current.get("buff_session", "")),
-        "buff_cookies": _encrypt_value(buff_cookies if buff_cookies is not None else current.get("buff_cookies", "")),
+        "buff_auth": _encrypt_value(buff_auth if buff_auth is not None else current.get("buff_auth", "")),
         "steam_cookies": _encrypt_value(steam_cookies if steam_cookies is not None else current.get("steam_cookies", "")),
         "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     }
@@ -327,16 +325,15 @@ def clear_credentials(fields=None):
     if not current:
         return
 
-    fields = set(fields or ["buff_session", "buff_cookies", "steam_cookies"])
-    next_buff = "" if "buff_session" in fields else current.get("buff_session", "")
-    next_buff_cookies = "" if "buff_cookies" in fields else current.get("buff_cookies", "")
+    fields = set(fields or ["buff_auth", "steam_cookies"])
+    next_buff_auth = "" if "buff_auth" in fields else current.get("buff_auth", "")
     next_steam = "" if "steam_cookies" in fields else current.get("steam_cookies", "")
 
-    if not next_buff and not next_buff_cookies and not next_steam:
+    if not next_buff_auth and not next_steam:
         delete_system_config(CREDENTIAL_CONFIG_KEY)
         return
 
-    save_credentials(buff_session=next_buff, buff_cookies=next_buff_cookies, steam_cookies=next_steam)
+    save_credentials(buff_auth=next_buff_auth, steam_cookies=next_steam)
 
 
 def get_saved_settings():
@@ -382,15 +379,13 @@ def merge_runtime_config(request_config):
         "max_sell_price": str(request_config.get("max_sell_price") or saved_settings.get("max_sell_price") or "300"),
         "min_sell_count": str(request_config.get("min_sell_count") or saved_settings.get("min_sell_count") or "20"),
         "web_auth": bool(request_config.get("web_auth") if "web_auth" in request_config else saved_settings.get("web_auth", False)),
-        "buff_session": str(request_config.get("buff_session") or saved_credentials.get("buff_session") or "").strip(),
-        "buff_cookies": str(request_config.get("buff_cookies") or saved_credentials.get("buff_cookies") or "").strip(),
+        "buff_auth": str(request_config.get("buff_auth") or saved_credentials.get("buff_auth") or "").strip(),
         "steam_cookies": str(request_config.get("steam_cookies") or saved_credentials.get("steam_cookies") or "").strip(),
     }
 
-    if merged["buff_session"] or merged["buff_cookies"] or merged["steam_cookies"]:
+    if merged["buff_auth"] or merged["steam_cookies"]:
         save_credentials(
-            buff_session=merged["buff_session"] if merged["buff_session"] else None,
-            buff_cookies=merged["buff_cookies"] if merged["buff_cookies"] else None,
+            buff_auth=merged["buff_auth"] if merged["buff_auth"] else None,
             steam_cookies=merged["steam_cookies"] if merged["steam_cookies"] else None,
         )
 
@@ -402,7 +397,7 @@ def build_credentials_status():
     saved_settings = get_saved_settings()
     saved_credentials = get_saved_credentials()
     credential_health = get_credential_health()
-    has_buff = bool(saved_credentials.get("buff_session") or saved_credentials.get("buff_cookies"))
+    has_buff = bool(saved_credentials.get("buff_auth"))
     has_steam = bool(saved_credentials.get("steam_cookies"))
 
     return {
@@ -432,10 +427,8 @@ def build_credentials_status():
 
 def sanitize_config_for_log(config):
     safe = dict(config)
-    if safe.get("buff_session"):
-        safe["buff_session"] = "[REDACTED]"
-    if safe.get("buff_cookies"):
-        safe["buff_cookies"] = "[REDACTED]"
+    if safe.get("buff_auth"):
+        safe["buff_auth"] = "[REDACTED]"
     if safe.get("steam_cookies"):
         safe["steam_cookies"] = "[REDACTED]"
     return safe
@@ -460,14 +453,20 @@ def normalize_buff_game(game_value):
 
 
 def get_buff_cookie_jar(config):
-    cookie_string = str(config.get("buff_cookies") or "").strip()
-    if cookie_string:
-        cookies = parse_cookies_string(cookie_string)
-        if cookies:
-            return cookies
+    raw_auth = str(config.get("buff_auth") or "").strip()
+    if not raw_auth:
+        return {}
 
-    buff_session = str(config.get("buff_session") or "").strip()
-    return {"session": buff_session} if buff_session else {}
+    cookies = parse_cookies_string(raw_auth)
+    if cookies:
+        return cookies
+
+    return {"session": raw_auth}
+
+
+def get_buff_session_value(config):
+    cookies = get_buff_cookie_jar(config)
+    return str(cookies.get("session") or "").strip()
 
 
 def get_buff_buy_settings():
@@ -746,12 +745,12 @@ class ScraperService:
             "sort_by": "price.asc",  # 通常需要排序
             "_": int(time.time() * 1000)  # 防止缓存
         }
-        # 获取 buff_session，注意要检查是否为空字符串
-        buff_session = self.config.get("buff_session", "").strip()
+        # 兼容单值输入：纯 session 或完整 cookie 字符串
+        buff_session = get_buff_session_value(self.config)
         cookies = get_buff_cookie_jar(self.config)
         
         if not buff_session:
-            print("警告: buff_session 未配置或为空，可能导致 Buff API 返回'请先登录'错误")
+            print("警告: BUFF 凭证未配置或缺少 session，可能导致 Buff API 返回'请先登录'错误")
 
         try:
             # FIX: 使用 self.session.get 而不是 requests.get，确保代理生效
@@ -1098,7 +1097,7 @@ def api_save_config():
 @admin_required
 def api_clear_credentials():
     data = request.get_json(silent=True) or {}
-    fields = data.get("fields") or ["buff_session", "steam_cookies"]
+    fields = data.get("fields") or ["buff_auth", "steam_cookies"]
     clear_credentials(fields=fields)
     return jsonify({
         "success": True,
@@ -1416,7 +1415,7 @@ def api_test_connection():
         config = merge_runtime_config(request.get_json() or {})
         proxy_url = config.get('proxy_url')
         steam_cookies_str = config.get('steam_cookies')
-        buff_session = config.get('buff_session')
+        buff_session = get_buff_session_value(config)
 
         steam_cookies = parse_cookies_string(steam_cookies_str)
         buff_cookies = get_buff_cookie_jar(config)

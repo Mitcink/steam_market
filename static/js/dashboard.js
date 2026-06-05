@@ -195,7 +195,7 @@
             elements.testConnectionBtn.addEventListener("click", testConnection);
         }
         if (elements.clearBuffCredentialBtn) {
-            elements.clearBuffCredentialBtn.addEventListener("click", () => clearCredentials(["buff_session", "buff_cookies"]));
+            elements.clearBuffCredentialBtn.addEventListener("click", () => clearCredentials(["buff_auth"]));
         }
         if (elements.clearSteamCredentialBtn) {
             elements.clearSteamCredentialBtn.addEventListener("click", () => clearCredentials(["steam_cookies"]));
@@ -303,8 +303,7 @@
     function getFormConfig() {
         return {
             proxy_url: document.getElementById("proxy-url")?.value.trim() || "",
-            buff_session: document.getElementById("buff-session")?.value.trim() || "",
-            buff_cookies: document.getElementById("buff-cookies")?.value.trim() || "",
+            buff_auth: document.getElementById("buff-auth")?.value.trim() || "",
             steam_cookies: document.getElementById("steam-cookies")?.value.trim() || "",
             max_threads: document.getElementById("max-threads")?.value || "2",
             game_type: document.querySelector('input[name="game_type"]:checked')?.value || "CSGO",
@@ -494,14 +493,10 @@
     }
 
     function clearCredentialInputs() {
-        const buff = document.getElementById("buff-session");
-        const buffCookies = document.getElementById("buff-cookies");
+        const buff = document.getElementById("buff-auth");
         const steam = document.getElementById("steam-cookies");
         if (buff) {
             buff.value = "";
-        }
-        if (buffCookies) {
-            buffCookies.value = "";
         }
         if (steam) {
             steam.value = "";
@@ -511,16 +506,10 @@
 
     function updateProtectedFieldPlaceholders() {
         setProtectedFieldPlaceholder(
-            "buff-session",
+            "buff-auth",
             state.credentialStatus?.buff?.configured,
-            "在 Buff 登录后，将 session 值粘贴到这里",
-            "已保存到服务器；如需替换，直接粘贴新的 session",
-        );
-        setProtectedFieldPlaceholder(
-            "buff-cookies",
-            state.credentialStatus?.buff?.configured,
-            "推荐：直接粘贴浏览器里 buff.163.com 的完整 Cookie 字符串",
-            "已保存到服务器；如需替换，重新粘贴完整 BUFF Cookie 字符串",
+            "这里既可以粘贴 session，也可以直接粘贴完整 BUFF Cookie 字符串",
+            "已保存到服务器；如需替换，重新粘贴新的 session 或完整 BUFF Cookie",
         );
         setProtectedFieldPlaceholder(
             "steam-cookies",

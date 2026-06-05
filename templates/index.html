@@ -210,19 +210,14 @@
                                     <ol class="token-guide-list">
                                         <li>点击“打开 Buff”并完成登录。</li>
                                         <li>打开浏览器开发者工具，进入 Application 或 Storage 面板。</li>
-                                        <li>找到 `buff.163.com` 下的 `session` 值。</li>
-                                        <li>复制后粘贴回当前输入框。</li>
+                                        <li>如果你只想抓行情，可以复制 `buff.163.com` 下的 `session` 值。</li>
+                                        <li>如果你要批量下单，推荐直接复制整段 BUFF Cookie 字符串并粘贴到这里。</li>
                                     </ol>
                                 </div>
                                 <div class="field">
                                     <div class="inline-stat" id="buff-credential-status">未保存</div>
-                                    <textarea class="textarea" id="buff-session" placeholder="在 Buff 登录后，将 session 值粘贴到这里"></textarea>
-                                    <span class="field-hint">兼容旧抓取方式。只填这个通常足够抓行情，但不一定足够完成批量下单。</span>
-                                </div>
-                                <div class="field">
-                                    <label for="buff-cookies">完整 BUFF Cookie 字符串</label>
-                                    <textarea class="textarea" id="buff-cookies" placeholder="推荐：直接粘贴浏览器里 buff.163.com 的完整 Cookie 字符串"></textarea>
-                                    <span class="field-hint">推荐给批量下单使用。至少应包含 `session`，最好同时包含 `csrf_token` 等字段。</span>
+                                    <textarea class="textarea" id="buff-auth" placeholder="这里既可以粘贴 session，也可以直接粘贴完整 BUFF Cookie 字符串"></textarea>
+                                    <span class="field-hint">系统会自动识别你贴的是单独的 `session` 还是完整 Cookie。若检测到完整 Cookie，会自动提取其中的 `session`，并在批量下单时优先走完整 Cookie 流程。</span>
                                 </div>
                                 <div class="inline-actions token-actions">
                                     <button class="btn btn-ghost" type="button" id="clear-buff-credential-btn">清除 BUFF 凭证</button>

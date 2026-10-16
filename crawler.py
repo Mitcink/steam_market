@@ -21,6 +21,9 @@ MIN_STEAM_VOLUME = 20
 STEAM_FEE_FACTOR = 0.85
 EMPTY_PAGE_LIMIT = 3
 BUFF_PAGE_SIZE = 80
+BUFF_PAGE_INTERVAL = 6.0
+BUFF_429_BASE_WAIT = 60
+BUFF_429_MAX_WAIT = 180
 ROUND_PAUSE_SECONDS = 180
 # priceoverview 很紧，每轮只补少量，同一饰品 6 小时内不重复请求
 STEAM_CALLS_PER_ROUND = 10
@@ -257,7 +260,8 @@ class MarketCrawler:
             f"BUFF 在售数 ≥ {min_sell_count}"
         )
         self.log(
-            f"BUFF 参考价比例高于 {REFERENCE_SKIP_RATIO} 才跳过 Steam。"
+            f"BUFF 列表每页间隔约 {BUFF_PAGE_INTERVAL:.0f} 秒，遇到 429 会等待后重试同一页。"
+            f"参考价比例高于 {REFERENCE_SKIP_RATIO} 才跳过 Steam。"
             "Steam 价格和成交量优先用 6 小时内的缓存。"
             f"每轮最多新请求 {STEAM_CALLS_PER_ROUND} 次，间隔约 {STEAM_MIN_INTERVAL:.0f} 秒。"
             "遇到 429 就停止本轮 Steam 请求，已有缓存的饰品仍会保存。"
@@ -279,12 +283,21 @@ class MarketCrawler:
         page_num = 1
         total_pages = 1
         empty_streak = 0
+        rate_streak = 0
 
         while not self.should_stop():
-            items, reported_pages, ok = self._fetch_buff_page(page_num)
+            items, reported_pages, status = self._fetch_buff_page(page_num)
             if reported_pages:
                 total_pages = reported_pages
-            if not ok or not items:
+            if status == "rate_limited":
+                rate_streak += 1
+                wait = min(BUFF_429_BASE_WAIT * (2 ** (rate_streak - 1)), BUFF_429_MAX_WAIT)
+                self.log(f"BUFF 429，{wait:.0f} 秒后重试第 {page_num} 页")
+                if not self._sleep(wait):
+                    return False
+                continue
+            if status != "ok" or not items:
+                rate_streak = 0
                 empty_streak += 1
                 self.log(f"页面 {page_num} 无物品（连续 {empty_streak} 次）")
                 if empty_streak >= EMPTY_PAGE_LIMIT:
@@ -295,6 +308,7 @@ class MarketCrawler:
                 continue
 
             empty_streak = 0
+            rate_streak = 0
             stats = self._process_page(items, min_sell_count)
             self.log(
                 f"页面 {page_num}/{total_pages}：{len(items)} 个，"
@@ -306,7 +320,7 @@ class MarketCrawler:
             page_num += 1
             if page_num > total_pages:
                 return True
-            if not self._sleep(1):
+            if not self._sleep(BUFF_PAGE_INTERVAL + random.uniform(0.5, 2.0)):
                 return False
         return False
 
@@ -582,18 +596,26 @@ class MarketCrawler:
                 },
                 timeout=15,
             )
+        except requests.RequestException as exc:
+            self.log(f"获取 Buff 数据时发生错误: {exc}")
+            return [], 0, "error"
+
+        if response.status_code == 429:
+            return [], 0, "rate_limited"
+
+        try:
             response.raise_for_status()
             data = response.json()
         except (requests.RequestException, ValueError) as exc:
             self.log(f"获取 Buff 数据时发生错误: {exc}")
-            return [], 0, False
+            return [], 0, "error"
 
         if data.get("code") == "OK" and "data" in data:
             payload = data["data"] or {}
-            return payload.get("items") or [], int(payload.get("total_page") or 0), True
+            return payload.get("items") or [], int(payload.get("total_page") or 0), "ok"
 
         self.log(f"Buff API 错误: {data.get('error') or data.get('code') or '未知错误'}")
-        return [], 0, False
+        return [], 0, "error"
 
     def _configure_proxy(self):
         proxy_url = (self.config.get("proxy_url") or "").strip()

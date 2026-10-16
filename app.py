@@ -248,6 +248,12 @@ def init_db():
             listings_fetched_at TEXT
         )
         ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS crawler_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        ''')
 
         conn.commit()
     

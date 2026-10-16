@@ -1,7 +1,7 @@
 """BUFF 列表扫描 + 少量 Steam 补全。
 
-比例先用 BUFF 上的 Steam 参考价判断。Steam 的 priceoverview 每轮最多请求 10 次，
-结果缓存 6 小时。遇到 429 就停止本轮 Steam 请求，已有缓存的饰品继续入库。
+比例先用 BUFF 上的 Steam 参考价判断。Steam 的 priceoverview 每轮最多请求 20 次，
+结果缓存 6 小时。额度用完或连续 429 时停在当前页，下一轮从这一页继续。
 """
 
 import random
@@ -25,10 +25,12 @@ BUFF_PAGE_INTERVAL = 6.0
 BUFF_429_BASE_WAIT = 60
 BUFF_429_MAX_WAIT = 180
 ROUND_PAUSE_SECONDS = 180
-# priceoverview 很紧，每轮只补少量，同一饰品 6 小时内不重复请求
-STEAM_CALLS_PER_ROUND = 10
+# priceoverview 很紧。每轮只补一批，同一饰品 6 小时内不重复请求。
+# 额度用完就停在当前页，不要把后面的列表空跑完。
+STEAM_CALLS_PER_ROUND = 20
 STEAM_CACHE_TTL_SECONDS = 6 * 60 * 60
 STEAM_MIN_INTERVAL = 8.0
+STEAM_429_RETRIES = 3
 
 _INVALID_PROXY_URLS = {
     "https://store.steampowered.com/",
@@ -202,6 +204,14 @@ def ensure_crawler_schema(db_file):
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crawler_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
@@ -245,7 +255,7 @@ class MarketCrawler:
         self.quotes = {}
         self.steam_calls = 0
         self.steam_blocked = False
-        self.budget_logged = False
+        self.catalog_paused = False
         self.session = requests.Session()
         self._configure_proxy()
 
@@ -264,13 +274,13 @@ class MarketCrawler:
             f"参考价比例高于 {REFERENCE_SKIP_RATIO} 才跳过 Steam。"
             "Steam 价格和成交量优先用 6 小时内的缓存。"
             f"每轮最多新请求 {STEAM_CALLS_PER_ROUND} 次，间隔约 {STEAM_MIN_INTERVAL:.0f} 秒。"
-            "遇到 429 就停止本轮 Steam 请求，已有缓存的饰品仍会保存。"
+            "额度用完或连续 429 就停在当前页，下一轮从这一页继续。"
         )
 
         while not self.should_stop():
             self.steam_calls = 0
             self.steam_blocked = False
-            self.budget_logged = False
+            self.catalog_paused = False
             if not self._scan_catalog(min_sell_count):
                 break
             if self.should_stop():
@@ -280,20 +290,27 @@ class MarketCrawler:
                 break
 
     def _scan_catalog(self, min_sell_count):
-        page_num = 1
-        total_pages = 1
+        page_num = self._load_resume_page()
+        total_pages = max(page_num, 1)
         empty_streak = 0
         rate_streak = 0
+        if page_num > 1:
+            self.log(f"从第 {page_num} 页继续。")
 
         while not self.should_stop():
             items, reported_pages, status = self._fetch_buff_page(page_num)
             if reported_pages:
                 total_pages = reported_pages
+            if reported_pages and page_num > total_pages:
+                self._save_resume_page(1)
+                self.log("已扫完最后一页，下一轮从第 1 页开始。")
+                return True
             if status == "rate_limited":
                 rate_streak += 1
                 wait = min(BUFF_429_BASE_WAIT * (2 ** (rate_streak - 1)), BUFF_429_MAX_WAIT)
                 self.log(f"BUFF 429，{wait:.0f} 秒后重试第 {page_num} 页")
                 if not self._sleep(wait):
+                    self._save_resume_page(page_num)
                     return False
                 continue
             if status != "ok" or not items:
@@ -301,9 +318,11 @@ class MarketCrawler:
                 empty_streak += 1
                 self.log(f"页面 {page_num} 无物品（连续 {empty_streak} 次）")
                 if empty_streak >= EMPTY_PAGE_LIMIT:
+                    self._save_resume_page(page_num)
                     self.log("连续 3 次没有拿到 BUFF 列表，已停止。请检查 BUFF 登录凭证、价格区间或代理。")
                     return False
                 if not self._sleep(random.uniform(5, 8)):
+                    self._save_resume_page(page_num)
                     return False
                 continue
 
@@ -316,12 +335,26 @@ class MarketCrawler:
                 f"用缓存 {stats['cache_hits']}，请求 Steam {stats['steam_checked']}，"
                 f"未达标 {stats['below_threshold']}，入库 {stats['saved']}"
             )
+            if self.catalog_paused:
+                self._save_resume_page(page_num)
+                if self.steam_blocked:
+                    self.log(f"Steam 连续 429，停在第 {page_num} 页，下一轮从这里继续。")
+                else:
+                    self.log(
+                        f"本轮 Steam 请求已达 {STEAM_CALLS_PER_ROUND} 次，"
+                        f"停在第 {page_num} 页，下一轮从这里继续。"
+                    )
+                return True
 
             page_num += 1
             if page_num > total_pages:
+                self._save_resume_page(1)
+                self.log("已扫完最后一页，下一轮从第 1 页开始。")
                 return True
             if not self._sleep(BUFF_PAGE_INTERVAL + random.uniform(0.5, 2.0)):
+                self._save_resume_page(page_num)
                 return False
+        self._save_resume_page(page_num)
         return False
 
     def _process_page(self, items, min_sell_count):
@@ -365,17 +398,30 @@ class MarketCrawler:
             price_fresh = self._is_fresh(quote.get("price_fetched_at")) and (quote.get("sell_price") or 0) > 0
             if price_fresh:
                 stats["cache_hits"] += 1
-            elif self._can_call_steam():
+            elif not self._can_call_steam():
+                self.catalog_paused = True
+                break
+            else:
                 stats["steam_checked"] += 1
                 self.log(f"  处理: {item_name} (BUFF在售数: {buff_sell_num})")
 
             record = self._build_record(item, buff_sell_price, buff_sell_num, market_ref, reference)
+            if self.steam_blocked:
+                self.catalog_paused = True
+                if record:
+                    self.save_item(record)
+                    self.remember_item(record)
+                    stats["saved"] += 1
+                break
             if not record:
                 stats["below_threshold"] += 1
                 continue
             self.save_item(record)
             self.remember_item(record)
             stats["saved"] += 1
+            if self.steam_calls >= STEAM_CALLS_PER_ROUND:
+                self.catalog_paused = True
+                break
         return stats
 
     def _build_record(self, item, buff_sell_price, buff_sell_num, market_ref, reference):
@@ -452,14 +498,7 @@ class MarketCrawler:
         }
 
     def _can_call_steam(self):
-        if self.steam_blocked:
-            return False
-        if self.steam_calls >= STEAM_CALLS_PER_ROUND:
-            if not self.budget_logged:
-                self.budget_logged = True
-                self.log(f"本轮 Steam 请求已达 {STEAM_CALLS_PER_ROUND} 次，其余饰品用缓存，下轮再补。")
-            return False
-        return True
+        return not self.steam_blocked and self.steam_calls < STEAM_CALLS_PER_ROUND
 
     def _is_fresh(self, timestamp):
         age = quote_age_seconds(timestamp)
@@ -538,39 +577,44 @@ class MarketCrawler:
         return data
 
     def _steam_get(self, url, item_name=""):
-        """发一次 Steam 请求。429 后本轮不再继续打 Steam。"""
-        if not self._can_call_steam():
-            return None
-        if self.should_stop() or not self.pacer.wait(self._sleep):
-            return None
-        self.steam_calls += 1
-        try:
-            response = self.session.get(
-                url,
-                cookies=self.steam_cookies,
-                headers={
-                    "User-Agent": _BROWSER_UA,
-                    "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                },
-                timeout=15,
-            )
-        except requests.RequestException as exc:
-            self.log(f"    Steam 请求失败 ({item_name}): {exc}")
-            return None
+        """发一次 Steam 请求。429 时等待后重试，连续失败才暂停本轮。"""
+        for attempt in range(STEAM_429_RETRIES):
+            if self.steam_blocked or self.should_stop() or not self.pacer.wait(self._sleep):
+                return None
+            self.steam_calls += 1
+            try:
+                response = self.session.get(
+                    url,
+                    cookies=self.steam_cookies,
+                    headers={
+                        "User-Agent": _BROWSER_UA,
+                        "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    },
+                    timeout=15,
+                )
+            except requests.RequestException as exc:
+                self.log(f"    Steam 请求失败 ({item_name}): {exc}")
+                return None
 
-        if response.status_code == 429:
-            self.steam_blocked = True
-            self.log("Steam 429，本轮停止继续请求。已有缓存的饰品仍会保存。")
-            return None
+            if response.status_code != 429:
+                try:
+                    response.raise_for_status()
+                except requests.HTTPError as exc:
+                    self.log(f"    Steam HTTP 错误 ({item_name}): {exc}")
+                    return None
+                self.pacer.mark_sent()
+                return response
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            self.log(f"    Steam HTTP 错误 ({item_name}): {exc}")
-            return None
-        self.pacer.mark_sent()
-        return response
+            if attempt + 1 >= STEAM_429_RETRIES:
+                self.steam_blocked = True
+                self.log("Steam 连续 429，本轮暂停，稍后从当前页继续。")
+                return None
+            wait = min(BUFF_429_BASE_WAIT * (2 ** attempt), BUFF_429_MAX_WAIT)
+            self.log(f"Steam 429，{wait:.0f} 秒后重试当前饰品。")
+            if not self._sleep(wait):
+                return None
+        return None
 
     def _fetch_buff_page(self, page_num):
         params = {
@@ -662,6 +706,50 @@ class MarketCrawler:
                 "listings_fetched_at": row[6],
             }
         return quotes
+
+    def _catalog_signature(self):
+        game = str(self.config.get("game_type") or "CSGO").lower()
+        return "|".join([
+            game,
+            str(self.config.get("min_sell_price")),
+            str(self.config.get("max_sell_price")),
+            "price.asc",
+        ])
+
+    def _state_get(self, key):
+        with self.db_lock:
+            with sqlite3.connect(self.db_file, timeout=10) as conn:
+                row = conn.execute(
+                    "SELECT value FROM crawler_state WHERE key = ?",
+                    (key,),
+                ).fetchone()
+        return row[0] if row else None
+
+    def _state_set(self, key, value):
+        with self.db_lock:
+            with sqlite3.connect(self.db_file, timeout=10) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO crawler_state (key, value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (key, value),
+                )
+                conn.commit()
+
+    def _load_resume_page(self):
+        if self._state_get("catalog_signature") != self._catalog_signature():
+            return 1
+        try:
+            page = int(self._state_get("catalog_page") or 1)
+        except (TypeError, ValueError):
+            return 1
+        return page if page >= 1 else 1
+
+    def _save_resume_page(self, page_num):
+        self._state_set("catalog_signature", self._catalog_signature())
+        self._state_set("catalog_page", str(max(int(page_num), 1)))
 
     def _store_quote(self, steam_market_id, **fields):
         current = dict(self.quotes.get(steam_market_id) or {})

@@ -90,6 +90,14 @@ def init_database():
         )
         ''')
         print("✓ Steam 行情缓存表创建成功")
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS crawler_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        ''')
+        print("✓ 爬虫进度表创建成功")
         
         # 插入默认管理员
         cursor.execute("SELECT id FROM users WHERE username = ?", ('admin',))

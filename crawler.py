@@ -1,7 +1,7 @@
-"""BUFF 列表扫描 + Steam 行情补全。
+"""BUFF 列表扫描 + 少量 Steam 补全。
 
-先用 BUFF 自己的 Steam 参考价去掉明显没差价的饰品，只对剩下的请求 Steam。
-item_nameid 写入本地表，下一轮不再下载商品页 HTML。
+比例先用 BUFF 上的 Steam 参考价判断。Steam 的 priceoverview 每轮最多请求 10 次，
+结果缓存 6 小时。遇到 429 就停止本轮 Steam 请求，已有缓存的饰品继续入库。
 """
 
 import random
@@ -15,15 +15,17 @@ import requests
 
 # 与页面默认筛选一致
 MAX_SELL_RATIO = 0.8
+# BUFF 参考价更新慢，预筛放宽，只丢掉明显高于入库线的饰品
+REFERENCE_SKIP_RATIO = 0.85
 MIN_STEAM_VOLUME = 20
 STEAM_FEE_FACTOR = 0.85
-# 参考价算出的比例已经高于这个值时，即使 Steam 现价再高一截也过不了 0.8
-REFERENCE_SKIP_RATIO = 1.05
 EMPTY_PAGE_LIMIT = 3
 BUFF_PAGE_SIZE = 80
 ROUND_PAUSE_SECONDS = 180
-STEAM_MIN_INTERVAL = 2.5
-STEAM_MAX_INTERVAL = 90
+# priceoverview 很紧，每轮只补少量，同一饰品 6 小时内不重复请求
+STEAM_CALLS_PER_ROUND = 10
+STEAM_CACHE_TTL_SECONDS = 6 * 60 * 60
+STEAM_MIN_INTERVAL = 8.0
 
 _INVALID_PROXY_URLS = {
     "https://store.steampowered.com/",
@@ -43,10 +45,10 @@ _BROWSER_UA = (
 
 
 class SteamPacer:
-    """所有 Steam 请求共用一个间隔。429 时把间隔拉长，成功后再慢慢收回来。"""
+    """Steam 请求之间固定留出间隔，避免连续打满 priceoverview。"""
 
     def __init__(self):
-        self.interval = 3.0
+        self.interval = STEAM_MIN_INTERVAL
         self._next_at = 0.0
 
     def wait(self, sleep):
@@ -56,15 +58,8 @@ class SteamPacer:
         return True
 
     def mark_sent(self):
-        jitter = random.uniform(0.2, 0.8)
+        jitter = random.uniform(0.4, 1.2)
         self._next_at = time.time() + self.interval + jitter
-
-    def penalize(self):
-        self.interval = min(max(self.interval * 2, 60), STEAM_MAX_INTERVAL)
-        self._next_at = time.time() + self.interval
-
-    def reward(self):
-        self.interval = max(STEAM_MIN_INTERVAL, self.interval * 0.85)
 
 
 def parse_steam_price_text(raw_value):
@@ -180,7 +175,7 @@ def sell_ratio(buff_sell_price, steam_sell_price):
     return buff_sell_price / (steam_sell_price * STEAM_FEE_FACTOR)
 
 
-def ensure_nameid_schema(db_file):
+def ensure_crawler_schema(db_file):
     with sqlite3.connect(db_file, timeout=10) as conn:
         conn.execute(
             """
@@ -191,7 +186,30 @@ def ensure_nameid_schema(db_file):
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS steam_quotes (
+                steam_market_id TEXT PRIMARY KEY,
+                sell_price REAL,
+                buy_price REAL,
+                sell_num INTEGER,
+                volume INTEGER,
+                price_fetched_at TEXT,
+                listings_fetched_at TEXT
+            )
+            """
+        )
         conn.commit()
+
+
+def quote_age_seconds(timestamp):
+    if not timestamp:
+        return None
+    try:
+        fetched = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return (datetime.now() - fetched).total_seconds()
 
 
 class MarketCrawler:
@@ -221,12 +239,17 @@ class MarketCrawler:
         self.should_stop = should_stop
         self.pacer = SteamPacer()
         self.nameids = {}
+        self.quotes = {}
+        self.steam_calls = 0
+        self.steam_blocked = False
+        self.budget_logged = False
         self.session = requests.Session()
         self._configure_proxy()
 
     def run(self):
-        ensure_nameid_schema(self.db_file)
+        ensure_crawler_schema(self.db_file)
         self.nameids = self._load_nameids()
+        self.quotes = self._load_quotes()
         min_sell_count = int(self.config["min_sell_count"])
         self.log(
             "入库条件与页面默认筛选一致: "
@@ -234,12 +257,16 @@ class MarketCrawler:
             f"BUFF 在售数 ≥ {min_sell_count}"
         )
         self.log(
-            f"BUFF 每页 {BUFF_PAGE_SIZE} 条。参考价比例 > {REFERENCE_SKIP_RATIO} 的不请求 Steam。"
-            f"已缓存 {len(self.nameids)} 个 Steam item_nameid。"
-            f"每轮结束后暂停 {ROUND_PAUSE_SECONDS} 秒。"
+            f"BUFF 参考价比例高于 {REFERENCE_SKIP_RATIO} 才跳过 Steam。"
+            "Steam 价格和成交量优先用 6 小时内的缓存。"
+            f"每轮最多新请求 {STEAM_CALLS_PER_ROUND} 次，间隔约 {STEAM_MIN_INTERVAL:.0f} 秒。"
+            "遇到 429 就停止本轮 Steam 请求，已有缓存的饰品仍会保存。"
         )
 
         while not self.should_stop():
+            self.steam_calls = 0
+            self.steam_blocked = False
+            self.budget_logged = False
             if not self._scan_catalog(min_sell_count):
                 break
             if self.should_stop():
@@ -272,7 +299,8 @@ class MarketCrawler:
             self.log(
                 f"页面 {page_num}/{total_pages}：{len(items)} 个，"
                 f"在售达标 {stats['qualified']}，参考价跳过 {stats['reference_skipped']}，"
-                f"查询 Steam {stats['steam_checked']}，入库 {stats['saved']}"
+                f"用缓存 {stats['cache_hits']}，请求 Steam {stats['steam_checked']}，"
+                f"未达标 {stats['below_threshold']}，入库 {stats['saved']}"
             )
 
             page_num += 1
@@ -283,7 +311,14 @@ class MarketCrawler:
         return False
 
     def _process_page(self, items, min_sell_count):
-        stats = {"qualified": 0, "reference_skipped": 0, "steam_checked": 0, "saved": 0}
+        stats = {
+            "qualified": 0,
+            "reference_skipped": 0,
+            "cache_hits": 0,
+            "steam_checked": 0,
+            "below_threshold": 0,
+            "saved": 0,
+        }
         for item in items:
             if self.should_stop():
                 break
@@ -307,66 +342,80 @@ class MarketCrawler:
                 stats["reference_skipped"] += 1
                 continue
 
-            self.log(f"  处理: {item_name} (BUFF在售数: {buff_sell_num})")
-            stats["steam_checked"] += 1
-            record = self._fetch_steam_record(item, buff_sell_price, buff_sell_num)
+            market_ref = extract_steam_market_ref(item.get("steam_market_url"))
+            if not market_ref:
+                self.log(f"    无法解析 Steam 市场链接: {item_name}")
+                continue
+
+            quote = self.quotes.get(market_ref["steam_market_id"]) or {}
+            price_fresh = self._is_fresh(quote.get("price_fetched_at")) and (quote.get("sell_price") or 0) > 0
+            if price_fresh:
+                stats["cache_hits"] += 1
+            elif self._can_call_steam():
+                stats["steam_checked"] += 1
+                self.log(f"  处理: {item_name} (BUFF在售数: {buff_sell_num})")
+
+            record = self._build_record(item, buff_sell_price, buff_sell_num, market_ref, reference)
             if not record:
+                stats["below_threshold"] += 1
                 continue
             self.save_item(record)
             self.remember_item(record)
             stats["saved"] += 1
-            self.log(f"    ✓ 已保存，数据库共 {self.count_items()} 条")
         return stats
 
-    def _fetch_steam_record(self, item, buff_sell_price, buff_sell_num):
-        market_url = item.get("steam_market_url")
-        market_ref = extract_steam_market_ref(market_url)
-        if not market_ref:
-            self.log(f"    无法解析 Steam 市场链接: {item.get('name')} -> {market_url}")
-            return None
+    def _build_record(self, item, buff_sell_price, buff_sell_num, market_ref, reference):
+        steam_market_id = market_ref["steam_market_id"]
+        quote = dict(self.quotes.get(steam_market_id) or {})
+        steam_sell_price = float(quote.get("sell_price") or 0)
+        steam_volume = int(quote.get("volume") or 0)
+        steam_sell_num = int(quote.get("sell_num") or 0)
+        steam_buy_price = float(quote.get("buy_price") or 0)
+        item_name = item.get("name", "未知")
 
-        overview = self._price_overview(market_ref["appid"], market_ref["market_hash_name"])
-        if not overview:
-            return None
+        if not self._is_fresh(quote.get("price_fetched_at")) or steam_sell_price <= 0:
+            overview = self._price_overview(market_ref["appid"], market_ref["market_hash_name"])
+            if overview and overview["lowest_price"] > 0:
+                steam_sell_price = overview["lowest_price"]
+                steam_volume = overview["volume"]
+                self._store_quote(
+                    steam_market_id,
+                    sell_price=steam_sell_price,
+                    volume=steam_volume,
+                    price_fetched_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            elif steam_sell_price <= 0 and reference > 0:
+                steam_sell_price = reference
 
-        steam_sell_price = overview["lowest_price"]
-        steam_volume = overview["volume"]
+        if (
+            steam_sell_num <= 0
+            and not self._is_fresh(quote.get("listings_fetched_at"))
+            and self._is_fresh(quote.get("price_fetched_at"))
+            and self._can_call_steam()
+            and steam_sell_price > 0
+        ):
+            listings = self._fetch_listings(item, steam_market_id)
+            if listings:
+                steam_sell_num = listings["sell_num"]
+                steam_buy_price = listings["buy_price"]
+                self._store_quote(
+                    steam_market_id,
+                    sell_num=steam_sell_num,
+                    buy_price=steam_buy_price,
+                    listings_fetched_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+
         if steam_sell_price <= 0:
-            self.log(f"    Steam 没有最低出售价，跳过: {item.get('name')}")
             return None
 
         ratio = sell_ratio(buff_sell_price, steam_sell_price)
-        self.log(
-            f"    比例: {ratio:.2f} "
-            f"(BUFF出售价:¥{buff_sell_price} Steam出售价:¥{steam_sell_price} "
-            f"Steam成交量:{steam_volume})"
-        )
         reasons = []
-        if ratio > MAX_SELL_RATIO:
-            reasons.append(f"比例 {ratio:.2f} > {MAX_SELL_RATIO}")
+        if ratio is None or ratio > MAX_SELL_RATIO:
+            reasons.append(f"比例 {ratio:.2f} > {MAX_SELL_RATIO}" if ratio is not None else "没有 Steam 出售价")
         if steam_volume < MIN_STEAM_VOLUME:
             reasons.append(f"Steam成交量 {steam_volume} < {MIN_STEAM_VOLUME}")
         if reasons:
-            self.log(f"    跳过，未达入库条件: {'; '.join(reasons)}")
             return None
-
-        steam_market_id = market_ref["steam_market_id"]
-        item_nameid = self.nameids.get(steam_market_id)
-        if not item_nameid:
-            item_nameid = self._fetch_item_nameid(market_url, steam_market_id, item.get("name"))
-
-        steam_sell_num = 0
-        steam_buy_price = 0.0
-        if item_nameid:
-            histogram = self._fetch_histogram(item_nameid, item.get("name"))
-            if histogram:
-                steam_sell_num = parse_histogram_sell_count(histogram)
-                steam_buy_price = parse_histogram_buy_price(histogram)
-                self.log(f"    Steam在售数: {steam_sell_num} 求购价:¥{steam_buy_price:.2f}")
-            else:
-                self.log(f"    Steam 直方图获取失败，在售数记为 0: {item.get('name')}")
-        else:
-            self.log(f"    未找到 Steam item_nameid，在售数记为 0: {item.get('name')}")
 
         try:
             buff_buy_price = float(item.get("buy_max_price") or 0)
@@ -374,7 +423,7 @@ class MarketCrawler:
             buff_buy_price = 0.0
 
         return {
-            "name": item.get("name"),
+            "name": item.get("name") or item_name,
             "kind": item.get("game"),
             "buff_id": item.get("id"),
             "steam_market_id": steam_market_id,
@@ -388,7 +437,38 @@ class MarketCrawler:
             "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
+    def _can_call_steam(self):
+        if self.steam_blocked:
+            return False
+        if self.steam_calls >= STEAM_CALLS_PER_ROUND:
+            if not self.budget_logged:
+                self.budget_logged = True
+                self.log(f"本轮 Steam 请求已达 {STEAM_CALLS_PER_ROUND} 次，其余饰品用缓存，下轮再补。")
+            return False
+        return True
+
+    def _is_fresh(self, timestamp):
+        age = quote_age_seconds(timestamp)
+        return age is not None and age < STEAM_CACHE_TTL_SECONDS
+
+    def _fetch_listings(self, item, steam_market_id):
+        item_name = item.get("name", "未知")
+        item_nameid = self.nameids.get(steam_market_id)
+        if not item_nameid:
+            item_nameid = self._fetch_item_nameid(item.get("steam_market_url"), steam_market_id, item_name)
+        if not item_nameid or not self._can_call_steam():
+            return None
+        histogram = self._fetch_histogram(item_nameid, item_name)
+        if not histogram:
+            return None
+        sell_num = parse_histogram_sell_count(histogram)
+        buy_price = parse_histogram_buy_price(histogram)
+        self.log(f"    Steam在售数: {sell_num} 求购价:¥{buy_price:.2f}")
+        return {"sell_num": sell_num, "buy_price": buy_price}
+
     def _price_overview(self, appid, market_hash_name):
+        if not self._can_call_steam():
+            return None
         query = urlencode({
             "appid": appid,
             "market_hash_name": market_hash_name,
@@ -444,39 +524,39 @@ class MarketCrawler:
         return data
 
     def _steam_get(self, url, item_name=""):
-        """发一次 Steam 请求。429 时拉长间隔并再试一次。停止信号返回 None。"""
-        for attempt in range(2):
-            if self.should_stop() or not self.pacer.wait(self._sleep):
-                return None
-            try:
-                response = self.session.get(
-                    url,
-                    cookies=self.steam_cookies,
-                    headers={
-                        "User-Agent": _BROWSER_UA,
-                        "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                    },
-                    timeout=15,
-                )
-            except requests.RequestException as exc:
-                self.log(f"    Steam 请求失败 ({item_name}): {exc}")
-                return None
+        """发一次 Steam 请求。429 后本轮不再继续打 Steam。"""
+        if not self._can_call_steam():
+            return None
+        if self.should_stop() or not self.pacer.wait(self._sleep):
+            return None
+        self.steam_calls += 1
+        try:
+            response = self.session.get(
+                url,
+                cookies=self.steam_cookies,
+                headers={
+                    "User-Agent": _BROWSER_UA,
+                    "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                },
+                timeout=15,
+            )
+        except requests.RequestException as exc:
+            self.log(f"    Steam 请求失败 ({item_name}): {exc}")
+            return None
 
-            if response.status_code == 429:
-                self.pacer.penalize()
-                self.log(f"Steam 429，下次请求间隔 {self.pacer.interval:.0f} 秒")
-                continue
+        if response.status_code == 429:
+            self.steam_blocked = True
+            self.log("Steam 429，本轮停止继续请求。已有缓存的饰品仍会保存。")
+            return None
 
-            try:
-                response.raise_for_status()
-            except requests.HTTPError as exc:
-                self.log(f"    Steam HTTP 错误 ({item_name}): {exc}")
-                return None
-            self.pacer.reward()
-            self.pacer.mark_sent()
-            return response
-        return None
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            self.log(f"    Steam HTTP 错误 ({item_name}): {exc}")
+            return None
+        self.pacer.mark_sent()
+        return response
 
     def _fetch_buff_page(self, page_num):
         params = {
@@ -538,6 +618,61 @@ class MarketCrawler:
                     "SELECT steam_market_id, item_nameid FROM steam_item_nameids"
                 ).fetchall()
         return {steam_market_id: item_nameid for steam_market_id, item_nameid in rows}
+
+    def _load_quotes(self):
+        with self.db_lock:
+            with sqlite3.connect(self.db_file, timeout=10) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT steam_market_id, sell_price, buy_price, sell_num, volume,
+                           price_fetched_at, listings_fetched_at
+                    FROM steam_quotes
+                    """
+                ).fetchall()
+        quotes = {}
+        for row in rows:
+            quotes[row[0]] = {
+                "sell_price": row[1] or 0,
+                "buy_price": row[2] or 0,
+                "sell_num": row[3] or 0,
+                "volume": row[4] or 0,
+                "price_fetched_at": row[5],
+                "listings_fetched_at": row[6],
+            }
+        return quotes
+
+    def _store_quote(self, steam_market_id, **fields):
+        current = dict(self.quotes.get(steam_market_id) or {})
+        current.update(fields)
+        self.quotes[steam_market_id] = current
+        with self.db_lock:
+            with sqlite3.connect(self.db_file, timeout=10) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO steam_quotes (
+                        steam_market_id, sell_price, buy_price, sell_num, volume,
+                        price_fetched_at, listings_fetched_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(steam_market_id) DO UPDATE SET
+                        sell_price = excluded.sell_price,
+                        buy_price = excluded.buy_price,
+                        sell_num = excluded.sell_num,
+                        volume = excluded.volume,
+                        price_fetched_at = excluded.price_fetched_at,
+                        listings_fetched_at = excluded.listings_fetched_at
+                    """,
+                    (
+                        steam_market_id,
+                        current.get("sell_price") or 0,
+                        current.get("buy_price") or 0,
+                        current.get("sell_num") or 0,
+                        current.get("volume") or 0,
+                        current.get("price_fetched_at"),
+                        current.get("listings_fetched_at"),
+                    ),
+                )
+                conn.commit()
 
     def _store_nameid(self, steam_market_id, item_nameid):
         self.nameids[steam_market_id] = item_nameid

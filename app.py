@@ -237,6 +237,17 @@ def init_db():
             updated_at TEXT NOT NULL
         )
         ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS steam_quotes (
+            steam_market_id TEXT PRIMARY KEY,
+            sell_price REAL,
+            buy_price REAL,
+            sell_num INTEGER,
+            volume INTEGER,
+            price_fetched_at TEXT,
+            listings_fetched_at TEXT
+        )
+        ''')
 
         conn.commit()
     

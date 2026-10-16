@@ -77,6 +77,19 @@ def init_database():
         )
         ''')
         print("✓ Steam item_nameid 缓存表创建成功")
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS steam_quotes (
+            steam_market_id TEXT PRIMARY KEY,
+            sell_price REAL,
+            buy_price REAL,
+            sell_num INTEGER,
+            volume INTEGER,
+            price_fetched_at TEXT,
+            listings_fetched_at TEXT
+        )
+        ''')
+        print("✓ Steam 行情缓存表创建成功")
         
         # 插入默认管理员
         cursor.execute("SELECT id FROM users WHERE username = ?", ('admin',))

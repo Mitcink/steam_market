@@ -105,9 +105,14 @@
                     </div>
                     <div class="card-body stack">
                         <div class="field">
-                            <label for="proxy-url">代理地址</label>
-                            <input class="input" type="text" id="proxy-url" value="https://store.steampowered.com/" placeholder="http://127.0.0.1:7890">
-                            <span class="field-hint">支持 HTTP / HTTPS / SOCKS5 地址。不要把站点 URL 当作代理填入。</span>
+                            <label for="buff-proxy-url">BUFF 代理</label>
+                            <input class="input" type="text" id="buff-proxy-url" value="" placeholder="http://host.docker.internal:17890">
+                            <span class="field-hint">国内出口。本机代理要先隧道到服务器，容器里不要填 127.0.0.1。</span>
+                        </div>
+                        <div class="field">
+                            <label for="steam-proxy-url">Steam 代理</label>
+                            <input class="input" type="text" id="steam-proxy-url" value="" placeholder="http://主机:端口">
+                            <span class="field-hint">单独一条代理。留空则使用服务器自己的 IP。</span>
                         </div>
                         <div class="terminal" id="test-log-box">
                             <p class="log-info">等待连通性检测。</p>

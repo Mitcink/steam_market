@@ -73,7 +73,8 @@
     };
 
     const configFieldIds = [
-        "proxy-url",
+        "buff-proxy-url",
+        "steam-proxy-url",
         "min-sell-count",
         "min-sell-price",
         "max-sell-price",
@@ -307,7 +308,8 @@
 
     function getFormConfig() {
         return {
-            proxy_url: document.getElementById("proxy-url")?.value.trim() || "",
+            buff_proxy_url: document.getElementById("buff-proxy-url")?.value.trim() || "",
+            steam_proxy_url: document.getElementById("steam-proxy-url")?.value.trim() || "",
             buff_auth: document.getElementById("buff-auth")?.value.trim() || "",
             steam_cookies: document.getElementById("steam-cookies")?.value.trim() || "",
             game_type: document.querySelector('input[name="game_type"]:checked')?.value || "CSGO",
@@ -319,7 +321,8 @@
 
     function splitLocalConfig(config) {
         return {
-            proxy_url: config.proxy_url,
+            buff_proxy_url: config.buff_proxy_url,
+            steam_proxy_url: config.steam_proxy_url || config.proxy_url,
             game_type: config.game_type,
             min_sell_price: config.min_sell_price,
             max_sell_price: config.max_sell_price,
@@ -386,7 +389,8 @@
 
     function applyConfigToForm(config) {
         const mapping = {
-            "proxy-url": config.proxy_url,
+            "buff-proxy-url": config.buff_proxy_url,
+            "steam-proxy-url": config.steam_proxy_url || config.proxy_url,
             "min-sell-count": config.min_sell_count,
             "min-sell-price": config.min_sell_price,
             "max-sell-price": config.max_sell_price,

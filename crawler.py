@@ -43,6 +43,16 @@ _INVALID_PROXY_URLS = {
     "http://buff.163.com/",
 }
 
+def normalize_proxy_url(raw_value):
+    """把代理地址整理成 requests 可用的 URL。站点地址和空值返回空字符串。"""
+    proxy_url = (raw_value or "").strip()
+    if not proxy_url or proxy_url in _INVALID_PROXY_URLS:
+        return ""
+    if proxy_url.lower().startswith(("http://", "https://", "socks5://", "socks5h://")):
+        return proxy_url
+    return "http://" + proxy_url
+
+
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -256,8 +266,9 @@ class MarketCrawler:
         self.steam_calls = 0
         self.steam_blocked = False
         self.catalog_paused = False
-        self.session = requests.Session()
-        self._configure_proxy()
+        self.buff_session = requests.Session()
+        self.steam_session = requests.Session()
+        self._configure_proxies()
 
     def run(self):
         ensure_crawler_schema(self.db_file)
@@ -583,7 +594,7 @@ class MarketCrawler:
                 return None
             self.steam_calls += 1
             try:
-                response = self.session.get(
+                response = self.steam_session.get(
                     url,
                     cookies=self.steam_cookies,
                     headers={
@@ -627,7 +638,7 @@ class MarketCrawler:
             "_": int(time.time() * 1000),
         }
         try:
-            response = self.session.get(
+            response = self.buff_session.get(
                 "https://buff.163.com/api/market/goods",
                 params=params,
                 cookies=self.buff_cookies,
@@ -661,21 +672,24 @@ class MarketCrawler:
         self.log(f"Buff API 错误: {data.get('error') or data.get('code') or '未知错误'}")
         return [], 0, "error"
 
-    def _configure_proxy(self):
-        proxy_url = (self.config.get("proxy_url") or "").strip()
+    def _configure_proxies(self):
+        self._apply_proxy(self.buff_session, self.config.get("buff_proxy_url"), "BUFF")
+        legacy_steam_proxy = self.config.get("steam_proxy_url") or self.config.get("proxy_url")
+        self._apply_proxy(self.steam_session, legacy_steam_proxy, "Steam")
+
+    def _apply_proxy(self, session, raw_value, label):
+        raw_value = (raw_value or "").strip()
+        proxy_url = normalize_proxy_url(raw_value)
         if not proxy_url:
-            self.log("未配置代理")
-            self.session.proxies = {}
+            session.proxies = {}
+            if raw_value:
+                self.log(f"{label} 代理地址无效，改为直接连接")
+            else:
+                self.log(f"{label} 未配置代理，直接连接")
             return
-        if proxy_url in _INVALID_PROXY_URLS:
-            self.log(f"检测到无效代理 URL: {proxy_url}，将不使用代理")
-            self.session.proxies = {}
-            return
-        if not proxy_url.startswith(("http://", "https://", "socks5://")):
-            proxy_url = "http://" + proxy_url
-        self.session.proxies = {"http": proxy_url, "https": proxy_url}
-        self.session.verify = False
-        self.log(f"已配置代理: {proxy_url}")
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        session.verify = False
+        self.log(f"{label} 已配置代理: {proxy_url}")
 
     def _load_nameids(self):
         with self.db_lock:

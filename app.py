@@ -17,7 +17,7 @@ from contextlib import contextmanager
 import urllib3
 from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
-from crawler import MAX_SELL_RATIO, MIN_STEAM_VOLUME, MarketCrawler
+from crawler import MAX_SELL_RATIO, MIN_STEAM_VOLUME, MarketCrawler, normalize_proxy_url
 
 # 假设 database.py 存在并处理 items 表
 try:
@@ -393,7 +393,8 @@ def get_saved_settings():
 
 def save_settings(config):
     allowed_keys = {
-        "proxy_url",
+        "buff_proxy_url",
+        "steam_proxy_url",
         "game_type",
         "min_sell_price",
         "max_sell_price",
@@ -414,8 +415,23 @@ def merge_runtime_config(request_config):
     saved_settings = get_saved_settings()
     saved_credentials = get_saved_credentials()
 
+    if "steam_proxy_url" in request_config:
+        steam_proxy_url = str(request_config.get("steam_proxy_url") or "").strip()
+    else:
+        steam_proxy_url = str(
+            saved_settings.get("steam_proxy_url")
+            or request_config.get("proxy_url")
+            or saved_settings.get("proxy_url")
+            or ""
+        ).strip()
+    if "buff_proxy_url" in request_config:
+        buff_proxy_url = str(request_config.get("buff_proxy_url") or "").strip()
+    else:
+        buff_proxy_url = str(saved_settings.get("buff_proxy_url") or "").strip()
+
     merged = {
-        "proxy_url": str(request_config.get("proxy_url") or saved_settings.get("proxy_url") or "").strip(),
+        "buff_proxy_url": buff_proxy_url,
+        "steam_proxy_url": steam_proxy_url,
         "game_type": request_config.get("game_type") or saved_settings.get("game_type") or "CSGO",
         "min_sell_price": str(request_config.get("min_sell_price") or saved_settings.get("min_sell_price") or "25"),
         "max_sell_price": str(request_config.get("max_sell_price") or saved_settings.get("max_sell_price") or "300"),
@@ -453,7 +469,8 @@ def build_credentials_status():
             "health": credential_health.get("steam", {}),
         },
         "settings": {
-            "proxy_url": saved_settings.get("proxy_url", ""),
+            "buff_proxy_url": saved_settings.get("buff_proxy_url", ""),
+            "steam_proxy_url": saved_settings.get("steam_proxy_url") or saved_settings.get("proxy_url", ""),
             "game_type": saved_settings.get("game_type", "CSGO"),
             "min_sell_price": saved_settings.get("min_sell_price", "25"),
             "max_sell_price": saved_settings.get("max_sell_price", "300"),
@@ -1117,32 +1134,25 @@ def api_create_purchase_record():
 def api_test_connection():
     try:
         config = merge_runtime_config(request.get_json() or {})
-        proxy_url = config.get('proxy_url')
         steam_cookies_str = config.get('steam_cookies')
-        buff_session = get_buff_session_value(config)
 
         steam_cookies = parse_cookies_string(steam_cookies_str)
         buff_cookies = get_buff_cookie_jar(config)
-
-        # 过滤无效代理逻辑
-        invalid_list = ["https://store.steampowered.com/", "http://store.steampowered.com/"]  # 简化的列表
-        effective_proxy = proxy_url if proxy_url and proxy_url not in invalid_list else None
-
-        # 修正：确保代理带有 scheme
-        if effective_proxy and not effective_proxy.startswith(('http', 'socks')):
-            effective_proxy = f"http://{effective_proxy}"
+        steam_proxy = normalize_proxy_url(config.get("steam_proxy_url"))
+        buff_proxy = normalize_proxy_url(config.get("buff_proxy_url"))
 
         steam_success, steam_msg = test_connection(
             "https://steamcommunity.com/market/",
             cookies=steam_cookies,
-            proxy=effective_proxy
+            proxy=steam_proxy or None
         )
-
         buff_success, buff_msg = test_connection(
             "https://buff.163.com",
             cookies=buff_cookies,
-            proxy=effective_proxy
+            proxy=buff_proxy or None
         )
+        steam_msg = f"{'经代理' if steam_proxy else '直连'} {steam_msg}"
+        buff_msg = f"{'经代理' if buff_proxy else '直连'} {buff_msg}"
 
         checked_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         save_credential_health({

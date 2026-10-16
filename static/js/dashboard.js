@@ -18,6 +18,8 @@
         statusInterval: null,
         isLoading: false,
         lastDataHash: "",
+        lastLogId: 0,
+        isPolling: false,
         crawlerStatus: "stopped",
         activePage: null,
         sectionObserver: null,
@@ -106,6 +108,7 @@
         resetFilters();
         checkCrawlerStatus();
         state.statusInterval = window.setInterval(checkCrawlerStatus, 10000);
+        fetchCrawlerLogs();
         fetchData();
     }
 
@@ -540,7 +543,7 @@
             elements.priceWindow.textContent = `¥${config.min_sell_price} - ¥${config.max_sell_price}`;
         }
         if (elements.activityWindow) {
-            elements.activityWindow.textContent = `${config.min_sell_count}+ 在售`;
+            elements.activityWindow.textContent = `BUFF 在售 ≥ ${config.min_sell_count}`;
         }
     }
 
@@ -667,11 +670,16 @@
             if (!result) {
                 return;
             }
+            const previousStatus = state.crawlerStatus;
             setCrawlerStatus(result.json.status || "stopped");
             if (state.crawlerStatus === "running") {
                 ensureDataPolling();
             } else {
                 stopDataPolling();
+                if (previousStatus === "running") {
+                    fetchCrawlerLogs();
+                    fetchData();
+                }
             }
         } catch (error) {
             console.error("Failed to check crawler status", error);
@@ -697,7 +705,64 @@
 
     function ensureDataPolling() {
         if (!state.dataInterval) {
-            state.dataInterval = window.setInterval(fetchData, 5000);
+            pollRuntime();
+            state.dataInterval = window.setInterval(pollRuntime, 5000);
+        }
+    }
+
+    async function pollRuntime() {
+        if (state.isPolling) {
+            return;
+        }
+        state.isPolling = true;
+        try {
+            await fetchCrawlerLogs();
+            await refreshMarketData();
+        } finally {
+            state.isPolling = false;
+        }
+    }
+
+    async function fetchCrawlerLogs() {
+        if (!elements.crawlerLog) {
+            return;
+        }
+        try {
+            const result = await fetchJson(`/api/crawler_log?after=${state.lastLogId || 0}`);
+            if (!result || !result.json.success) {
+                return;
+            }
+            (result.json.logs || []).forEach((entry) => {
+                appendServerLog(entry.message);
+                state.lastLogId = Math.max(state.lastLogId, Number(entry.id) || 0);
+            });
+        } catch (error) {
+            console.error("Failed to load crawler log", error);
+        }
+    }
+
+    function appendServerLog(message) {
+        const line = document.createElement("p");
+        line.className = "log-info";
+        line.textContent = message;
+        elements.crawlerLog.prepend(line);
+    }
+
+    async function refreshMarketData() {
+        try {
+            const result = await fetchJson("/api/data/version");
+            if (!result || !result.json.success) {
+                await fetchData();
+                return;
+            }
+            const meta = result.json.meta || {};
+            const nextHash = `${result.json.count}:${meta.latest_update_time || "none"}`;
+            if (state.lastDataHash && nextHash === state.lastDataHash) {
+                return;
+            }
+            await fetchData();
+        } catch (error) {
+            console.error("Failed to refresh market data", error);
         }
     }
 
@@ -915,7 +980,8 @@
             state.latestDate = payload.meta?.latest_date || "";
             syncDefaultUpdateDate();
 
-            const nextHash = `${payload.data.length}:${payload.data[0]?.update_time || "none"}:${payload.data[payload.data.length - 1]?.buff_id || "none"}`;
+            const latestUpdate = payload.meta?.latest_update_time || payload.data[0]?.update_time || "none";
+            const nextHash = `${payload.count ?? payload.data.length}:${latestUpdate}`;
             if (nextHash !== state.lastDataHash) {
                 state.lastDataHash = nextHash;
                 rebuildViewData();
@@ -1046,8 +1112,8 @@
         }
         if (elements.filterPanelCopy) {
             elements.filterPanelCopy.textContent = state.latestDate
-                ? `当前默认只显示 ${state.latestDate} 当天结果，可展开修改。`
-                : "默认按最新日期和业务阈值筛选，输入后立即生效。";
+                ? `默认只显示 ${state.latestDate} 当天，且 Steam 24 小时成交量 ≥ 20、比例 ≤ 0.8。`
+                : "默认只显示最新一天，且 Steam 24 小时成交量 ≥ 20、比例 ≤ 0.8。";
         }
 
         renderActiveFilterChips();
@@ -1095,7 +1161,7 @@
             chips.push(renderChip(`出售价比例(≤) ${state.filters.sellRatio.primary}`));
         }
         if (state.filters.volume && state.filters.volume.primary !== 20) {
-            chips.push(renderChip(`Steam 成交量(≥) ${state.filters.volume.primary}`));
+            chips.push(renderChip(`Steam 24小时成交(≥) ${state.filters.volume.primary}`));
         }
         if (state.filters.updateTime && state.filters.updateTime.primary !== state.latestDate) {
             chips.push(renderChip(`更新时间(≥) ${state.filters.updateTime.primary}`));

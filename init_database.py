@@ -68,6 +68,15 @@ def init_database():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_update_time ON market_items(update_time)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_kind ON market_items(kind)')
         print("✓ 索引创建成功")
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS steam_item_nameids (
+            steam_market_id TEXT PRIMARY KEY,
+            item_nameid TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        ''')
+        print("✓ Steam item_nameid 缓存表创建成功")
         
         # 插入默认管理员
         cursor.execute("SELECT id FROM users WHERE username = ?", ('admin',))

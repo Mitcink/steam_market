@@ -3,11 +3,11 @@ from flask_cors import CORS
 import threading
 import time
 import requests
+from collections import deque
 import json
 import re
 from datetime import datetime, timedelta, timezone
 import os
-import random
 import sqlite3
 import base64
 import hashlib
@@ -16,8 +16,8 @@ from functools import wraps
 from contextlib import contextmanager
 import urllib3
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 from cryptography.fernet import Fernet, InvalidToken
+from crawler import MAX_SELL_RATIO, MIN_STEAM_VOLUME, MarketCrawler
 
 # 假设 database.py 存在并处理 items 表
 try:
@@ -112,6 +112,27 @@ crawled_data = []
 is_crawling = False
 crawler_thread = None
 db_lock = threading.Lock()
+crawler_logs = deque(maxlen=300)
+crawler_log_lock = threading.Lock()
+crawler_log_seq = 0
+
+
+def append_crawler_log(message):
+    """同时打到标准输出和页面上的抓取日志。"""
+    global crawler_log_seq
+    text = str(message)
+    print(text)
+    stamped = f"{datetime.now().strftime('%H:%M:%S')} {text.strip()}"
+    with crawler_log_lock:
+        crawler_log_seq += 1
+        crawler_logs.append({"id": crawler_log_seq, "message": stamped})
+
+
+def snapshot_crawler_logs(after_id=0):
+    with crawler_log_lock:
+        lines = [entry for entry in crawler_logs if entry["id"] > after_id]
+        latest_id = crawler_log_seq
+    return lines, latest_id
 
 
 # ===================== 数据库辅助函数 =====================
@@ -209,6 +230,13 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_buff_id ON market_items(buff_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_update_time ON market_items(update_time)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_kind ON market_items(kind)')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS steam_item_nameids (
+            steam_market_id TEXT PRIMARY KEY,
+            item_nameid TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        ''')
 
         conn.commit()
     
@@ -588,7 +616,40 @@ def save_item_to_db(item):
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"保存数据到数据库时出错: {e}")
+            append_crawler_log(f"保存数据到数据库时出错: {e}")
+
+
+def count_market_items():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM market_items")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
+def market_data_meta(conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*), MAX(update_time), MAX(date(update_time)) FROM market_items")
+    count, latest_update_time, latest_date = cursor.fetchone()
+    return {
+        "count": count or 0,
+        "latest_update_time": latest_update_time,
+        "latest_date": latest_date,
+        "stale_window_days": STALE_DATA_WINDOW_DAYS,
+        "max_sell_ratio": MAX_SELL_RATIO,
+        "min_steam_volume": MIN_STEAM_VOLUME,
+    }
+
+
+def remember_crawled_item(item):
+    with db_lock:
+        for index, existing_item in enumerate(crawled_data):
+            if existing_item["buff_id"] == item["buff_id"]:
+                crawled_data[index] = item
+                return
+        crawled_data.append(item)
+        if len(crawled_data) > 1000:
+            crawled_data.pop(0)
 
 
 def prune_stale_market_data(max_age_days=STALE_DATA_WINDOW_DAYS):
@@ -644,408 +705,40 @@ def parse_cookies_string(cookie_string):
     return cookies
 
 
-def parse_steam_price_text(raw_value):
-    """把 Steam 返回的价格字符串安全转成浮点数。"""
-    if raw_value in (None, ""):
-        return 0.0
-
-    text = str(raw_value).strip()
-    cleaned = re.sub(r"[^\d,.\-]", "", text)
-    if not cleaned:
-        return 0.0
-
-    if "," in cleaned and "." in cleaned:
-        if cleaned.rfind(",") > cleaned.rfind("."):
-            cleaned = cleaned.replace(".", "").replace(",", ".")
-        else:
-            cleaned = cleaned.replace(",", "")
-    elif "," in cleaned:
-        cleaned = cleaned.replace(",", ".")
-
-    try:
-        return float(cleaned)
-    except ValueError:
-        return 0.0
-
-
-def extract_steam_market_ref(market_url):
-    """从 Steam 市场链接中提取 appid、market_hash_name 和 listings 路径。"""
-    if not market_url:
-        return None
-
-    parsed = urlparse(market_url)
-    parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) < 4 or parts[0] != "market" or parts[1] != "listings":
-        return None
-
-    appid = parts[2]
-    market_hash_name = unquote("/".join(parts[3:]))
-    return {
-        "appid": appid,
-        "market_hash_name": market_hash_name,
-        "steam_market_id": f"{appid}/{market_hash_name}",
-    }
-
-
-# ===================== 爬虫服务类 =====================
-
-class ScraperService:
-    def __init__(self, config):
-        self.config = config
-        self.session = requests.Session()
-
-        # 优化：添加更真实的 Headers
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "X-Requested-With": "XMLHttpRequest"
-        })
-
-        self._configure_proxy()
-
-    def _configure_proxy(self):
-        """配置代理"""
-        proxy_url = self.config.get("proxy_url")
-        if not proxy_url or not proxy_url.strip():
-            print("未配置代理或代理URL为空")
-            self.session.proxies = {}
-            return
-
-        # 无效代理列表检查 (保留原有逻辑)
-        invalid_proxy_urls = [
-            "https://store.steampowered.com/", "http://store.steampowered.com/",
-            "https://steamcommunity.com/", "http://steamcommunity.com/",
-            "https://steamcommunity.com/market/", "http://steamcommunity.com/market/",
-            "https://buff.163.com/", "http://buff.163.com/"
-        ]
-
-        if proxy_url in invalid_proxy_urls:
-            print(f"检测到无效代理URL: {proxy_url}，将不使用代理")
-            self.session.proxies = {}
-            return
-
-        # 格式化代理 URL
-        if not proxy_url.startswith(('http://', 'https://', 'socks5://')):
-            proxy_url = 'http://' + proxy_url
-
-        self.session.proxies = {
-            "http": proxy_url,
-            "https": proxy_url
-        }
-        self.session.verify = False  # 禁用 SSL 验证以支持某些代理
-        print(f"已配置代理: {proxy_url}")
-
-    def get_buff_items(self, page_num):
-        params = {
-            "game": self.config["game_type"].lower(),
-            "min_price": self.config["min_sell_price"],
-            "max_price": self.config["max_sell_price"],
-            "page_num": page_num,
-            "sort_by": "price.asc",  # 通常需要排序
-            "_": int(time.time() * 1000)  # 防止缓存
-        }
-        # 兼容单值输入：纯 session 或完整 cookie 字符串
-        buff_session = get_buff_session_value(self.config)
-        cookies = get_buff_cookie_jar(self.config)
-        
-        if not buff_session:
-            print("警告: BUFF 凭证未配置或缺少 session，可能导致 Buff API 返回'请先登录'错误")
-
-        try:
-            # FIX: 使用 self.session.get 而不是 requests.get，确保代理生效
-            response = self.session.get(
-                "https://buff.163.com/api/market/goods",
-                params=params,
-                cookies=cookies,
-                timeout=15
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("code") == "OK" and "data" in data:
-                items = data["data"].get("items", [])
-                total_page = data["data"].get("total_page", 0)
-                return items, total_page
-            else:
-                print(f"Buff API 错误: {data.get('error') or '未知错误'}")
-                return [], 0
-
-        except Exception as e:
-            print(f"获取 Buff 数据时发生错误: {e}")
-            return [], 0
-
-
-class BuffTradeService:
-    def __init__(self, config):
-        self.config = config
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": "https://buff.163.com/",
-        })
-        self.cookies = get_buff_cookie_jar(config)
-
-    def _request(self, method, url, *, params=None, data=None):
-        response = self.session.request(
-            method,
-            url,
-            params=params,
-            data=data,
-            cookies=self.cookies,
-            timeout=20,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("code") != "OK":
-            raise ValueError(payload.get("error") or payload.get("msg") or "BUFF 返回非 OK 响应")
-        return payload
-
-    def get_sell_order_book(self, game, goods_id, page_num=1):
-        params = {
-            "game": normalize_buff_game(game),
-            "goods_id": goods_id,
-            "page_num": page_num,
-            "_": int(time.time() * 1000),
-        }
-        payload = self._request("GET", "https://buff.163.com/api/market/goods/sell_order", params=params)
-        return payload.get("data") or {}
-
-    def preview_buy(self, *, game, sell_order_id, goods_id, price, steamid, allow_tradable_cooldown=0, cdkey_id=""):
-        params = {
-            "game": normalize_buff_game(game),
-            "sell_order_id": sell_order_id,
-            "goods_id": goods_id,
-            "price": price,
-            "allow_tradable_cooldown": allow_tradable_cooldown,
-            "cdkey_id": cdkey_id,
-            "steamid": steamid,
-            "_": int(time.time() * 1000),
-        }
-        return self._request("GET", "https://buff.163.com/api/market/goods/buy/preview", params=params)
-
-    def get_pay_method_description(self, *, pay_method, amount):
-        params = {
-            "hide_non_epay": "false",
-            "query_from": "cashier",
-            "pay_method": pay_method,
-            "amount": amount,
-            "_": int(time.time() * 1000),
-        }
-        return self._request("GET", "https://buff.163.com/api/asset/get_pay_method_description/", params=params)
-
-    def buy_order(self, *, game, sell_order_id, goods_id, price, steamid, pay_method, allow_tradable_cooldown=0, cdkey_id=""):
-        csrf_token = self.cookies.get("csrf_token") or self.cookies.get("csrf")
-        if not csrf_token:
-            raise ValueError("缺少 BUFF csrf_token，无法提交购买请求")
-
-        payload = {
-            "game": normalize_buff_game(game),
-            "sell_order_id": sell_order_id,
-            "goods_id": goods_id,
-            "price": price,
-            "steamid": steamid,
-            "pay_method": pay_method,
-            "allow_tradable_cooldown": allow_tradable_cooldown,
-            "cdkey_id": cdkey_id,
-            "csrf_token": csrf_token,
-        }
-        return self._request("POST", "https://buff.163.com/api/market/goods/buy", data=payload)
-
-    def get_steam_price_overview(self, appid, market_hash_name):
-        url = f"https://steamcommunity.com/market/priceoverview/?appid={appid}&market_hash_name={market_hash_name}&currency=23"
-        steam_cookies = parse_cookies_string(self.config["steam_cookies"])
-
-        try:
-            response = self.session.get(url, cookies=steam_cookies, timeout=15)
-
-            if response.status_code == 429:
-                print("Steam API 请求过多 (429)，暂停 60 秒...")
-                time.sleep(60)
-                return 0
-
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get('success'):
-                volume_str = re.sub(r"[^\d]", "", str(data.get('volume', '0')))
-                return {
-                    "success": True,
-                    "volume": int(volume_str) if volume_str else 0,
-                    "lowest_price": parse_steam_price_text(data.get("lowest_price")),
-                    "median_price": parse_steam_price_text(data.get("median_price")),
-                }
-        except Exception as e:
-            print(f"获取 Steam 销量失败 ({market_hash_name}): {e}")
-        return {
-            "success": False,
-            "volume": 0,
-            "lowest_price": 0.0,
-            "median_price": 0.0,
-        }
-
-    def get_steam_data(self, item):
-        market_url = item.get("steam_market_url")
-        if not market_url:
-            return None
-
-        steam_cookies = parse_cookies_string(self.config["steam_cookies"])
-        market_ref = extract_steam_market_ref(market_url)
-        if not market_ref:
-            print(f"无法解析 Steam 市场链接: {item['name']} -> {market_url}")
-            return None
-
-        try:
-            time.sleep(random.uniform(2, 4))
-            overview = self.get_steam_price_overview(market_ref["appid"], market_ref["market_hash_name"])
-            steam_sell_price = overview["lowest_price"] or overview["median_price"]
-            steam_volume = overview["volume"]
-            steam_sell_num = 0
-            steam_buy_price = 0.0
-
-            time.sleep(random.uniform(2, 4))
-            response = self.session.get(market_url, cookies=steam_cookies, timeout=15)
-            response.raise_for_status()
-            market_html = response.text
-
-            sell_num_patterns = [
-                r'"sell_order_count"\s*:\s*"?(\\?[\d,]+)"?',
-                r'"sell_listing_count"\s*:\s*"?(\\?[\d,]+)"?',
-                r'"quantity"\s*:\s*"?(\\?[\d,]+)"?',
-            ]
-            for pattern in sell_num_patterns:
-                sell_num_match = re.search(pattern, market_html)
-                if sell_num_match:
-                    raw_sell_num = re.sub(r"[^\d]", "", sell_num_match.group(1))
-                    if raw_sell_num:
-                        steam_sell_num = int(raw_sell_num)
-                        break
-
-            buy_price_patterns = [
-                r'"highest_buy_order"\s*:\s*"?(\\?[\d,.]+)"?',
-                r'"buy_order_price"\s*:\s*"?(\\?[\d,.]+)"?',
-            ]
-            for pattern in buy_price_patterns:
-                buy_price_match = re.search(pattern, market_html)
-                if buy_price_match:
-                    steam_buy_price = parse_steam_price_text(buy_price_match.group(1))
-                    if steam_buy_price > 0:
-                        break
-
-            if steam_sell_price <= 0:
-                print(f"Steam 价格为空，跳过: {item['name']}")
-                return None
-
-            return {
-                "name": item["name"],
-                "kind": item["game"],
-                "buff_id": item["id"],
-                "steam_market_id": market_ref["steam_market_id"],
-                "buff_buy_price": float(item["buy_max_price"]),
-                "buff_sell_price": float(item["sell_min_price"]),
-                "steam_sell_price": steam_sell_price,
-                "steam_buy_price": steam_buy_price,
-                "steam_sell_num": steam_sell_num,
-                "buff_sell_num": item["sell_num"],
-                "steam_volume": steam_volume,
-                "update_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-
-        except Exception as e:
-            print(f"处理 Steam 数据出错 ({item['name']}): {e}")
-            return None
-
-
 def run_crawler(config):
     global is_crawling
     is_crawling = True
+    append_crawler_log(f"使用配置启动爬虫: {sanitize_config_for_log(config)}")
+    if not get_buff_session_value(config):
+        append_crawler_log("警告: BUFF 凭证未配置或缺少 session，列表接口可能返回请先登录。")
 
-    print(f"使用配置启动爬虫: {sanitize_config_for_log(config)}")
-
-    scraper = ScraperService(config)
-    page_num = 1
-    total_pages = 10
-    new_items = []
-
+    crawler = MarketCrawler(
+        config,
+        db_file=DB_FILE,
+        db_lock=db_lock,
+        log=append_crawler_log,
+        save_item=save_item_to_db,
+        remember_item=remember_crawled_item,
+        count_items=count_market_items,
+        buff_cookies=get_buff_cookie_jar(config),
+        steam_cookies=parse_cookies_string(config.get("steam_cookies")),
+        should_stop=lambda: not is_crawling,
+    )
     try:
-        while is_crawling:
-            items, total_pages_buff = scraper.get_buff_items(page_num)
-
-            if total_pages_buff > 0:
-                total_pages = total_pages_buff
-
-            if not items:
-                print(f"页面 {page_num} 无物品，稍后重试...")
-                time.sleep(random.uniform(3, 5))
-                # 如果连续失败，可以考虑重置到第1页或停止
-                if page_num > 1:
-                    page_num = 1
-                continue
-            
-            print(f"页面 {page_num} 获取到 {len(items)} 个物品")
-            for item in items:
-                if not is_crawling:
-                    break
-
-                item_name = item.get('name', '未知')
-                sell_num = item.get("sell_num", 0)
-                
-                if sell_num >= int(config["min_sell_count"]):
-                    print(f"  处理: {item_name} (销量: {sell_num})")
-                    # 调用 get_steam_data 获取 Steam 市场数据
-                    processed_item = scraper.get_steam_data(item)
-
-                    if processed_item:
-                        if processed_item['steam_volume'] > 0 and processed_item['steam_sell_price'] > 0:
-                            sell_ratio = processed_item['buff_sell_price'] / (processed_item['steam_sell_price'] * 0.85)
-                            print(f"    比率: {sell_ratio:.2f} (Buff:¥{processed_item['buff_sell_price']} Steam:¥{processed_item['steam_sell_price']})")
-                            if sell_ratio < 0.88:
-                                print(f"    ✓ 保存到数据库")
-                                save_item_to_db(processed_item)
-                            with db_lock:
-                                found = False
-                                for i, existing_item in enumerate(crawled_data):
-                                    if existing_item['buff_id'] == processed_item['buff_id']:
-                                        crawled_data[i] = processed_item
-                                        found = True
-                                        break
-                                if not found:
-                                    crawled_data.append(processed_item)
-                                    if len(crawled_data) > 1000:
-                                        crawled_data.pop(0)
-
-                sleep_time = random.uniform(2, 5)
-                if len(crawled_data) > 200:
-                    sleep_time = random.uniform(5, 10)
-                time.sleep(sleep_time)
-
-            print(f"页面 {page_num} 处理完成，当前数据库共 {len(crawled_data)} 条数据")
-            page_num += 1
-            if page_num > total_pages:
-                print("已遍历所有页面，重新开始...")
-                page_num = 1
-                time.sleep(10)
-
-            if is_crawling:
-                print(f"准备抓取第 {page_num} 页...")
-                time.sleep(random.uniform(5, 10))
-
-    except Exception as e:
-        print(f"爬虫线程发生未捕获异常: {e}")
+        crawler.run()
+    except Exception as exc:
+        append_crawler_log(f"爬虫线程发生未捕获异常: {exc}")
         import traceback
         traceback.print_exc()
     finally:
         is_crawling = False
         prune_result = prune_stale_market_data()
         if prune_result["deleted"]:
-            print(
+            append_crawler_log(
                 f"停止抓取后已清理 {prune_result['deleted']} 条旧数据，"
                 f"保留 {prune_result['cutoff_date']} 及之后的记录。"
             )
-        print("爬虫线程已结束。")
+        append_crawler_log("爬虫线程已结束。")
 
 
 def test_connection(url, cookies=None, proxy=None):
@@ -1696,23 +1389,40 @@ def get_data():
         with db_lock:
             with get_db_connection() as conn:
                 items = fetch_market_items(conn)
-                cursor = conn.cursor()
-                cursor.execute("SELECT MAX(date(update_time)) FROM market_items")
-                latest_row = cursor.fetchone()
-                latest_date = latest_row[0] if latest_row else None
-            
+                meta = market_data_meta(conn)
+
         return jsonify({
             "success": True,
             "data": items,
-            "count": len(items),
-            "meta": {
-                "latest_date": latest_date,
-                "stale_window_days": STALE_DATA_WINDOW_DAYS
-            }
+            "count": meta["count"],
+            "meta": meta,
         })
     except Exception as e:
         print(f"获取数据时出错: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/data/version')
+@login_required
+def get_data_version():
+    try:
+        with get_db_connection() as conn:
+            meta = market_data_meta(conn)
+        return jsonify({"success": True, "count": meta["count"], "meta": meta})
+    except Exception as e:
+        print(f"获取数据版本时出错: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/crawler_log')
+@login_required
+def api_crawler_log():
+    try:
+        after_id = int(request.args.get("after") or 0)
+    except (TypeError, ValueError):
+        after_id = 0
+    lines, latest_id = snapshot_crawler_logs(after_id)
+    return jsonify({"success": True, "logs": lines, "latest_id": latest_id})
 
 
 @app.route('/api/clear_data', methods=['POST'])

@@ -128,7 +128,7 @@
                                 <button class="btn btn-primary" type="button" id="crawler-toggle-btn">启动抓取</button>
                                 <button class="btn btn-danger" type="button" data-clear-data>清空数据</button>
                             </div>
-                            <div class="inline-stat">最小活跃门槛: <strong id="activity-window">20+ 在售</strong></div>
+                            <div class="inline-stat">最小活跃门槛: <strong id="activity-window">BUFF 在售 ≥ 20</strong></div>
                             <div class="terminal" id="crawler-log-box">
                                 <p class="log-info">等待任务启动。</p>
                             </div>
@@ -178,17 +178,19 @@
                             <div class="field field-compact">
                                 <label for="max-threads">线程数</label>
                                 <input class="input input-compact" type="number" id="max-threads" min="1" max="99" value="2">
+                                <span class="field-hint">抓取固定单线程，这个值不会生效。</span>
                             </div>
                             <div class="field field-compact">
-                                <label for="min-sell-count">在售数</label>
+                                <label for="min-sell-count">BUFF 在售数</label>
                                 <input class="input input-compact" type="number" id="min-sell-count" min="0" max="999" value="20">
+                                <span class="field-hint">只看 BUFF 当前挂单，不是 Steam 成交量。</span>
                             </div>
                             <div class="field field-compact">
-                                <label for="min-sell-price">最低价</label>
+                                <label for="min-sell-price">BUFF 最低价</label>
                                 <input class="input input-compact" type="number" id="min-sell-price" min="0" max="999" value="25">
                             </div>
                             <div class="field field-compact">
-                                <label for="max-sell-price">最高价</label>
+                                <label for="max-sell-price">BUFF 最高价</label>
                                 <input class="input input-compact" type="number" id="max-sell-price" min="0" max="999" value="300">
                             </div>
                         </div>
@@ -294,7 +296,7 @@
                         <div class="filters-top">
                             <div>
                                 <h4>即时筛选</h4>
-                                <p id="filter-panel-copy">默认按最新日期和业务阈值筛选，输入后立即生效。</p>
+                                <p id="filter-panel-copy">默认只显示最新一天，且 Steam 24 小时成交量 ≥ 20、比例 ≤ 0.8。</p>
                             </div>
                             <div class="inline-actions">
                                 <button class="btn btn-ghost" type="button" id="toggle-filters-btn" aria-expanded="true">收起筛选</button>
@@ -325,7 +327,7 @@
                                 <input class="input input-compact input-tile" type="number" step="0.01" id="filter-sell-ratio-primary" min="0" max="9.99" value="0.8">
                             </div>
                             <div class="field field-compact">
-                                <label for="filter-volume-primary">Steam 成交量(≥)</label>
+                                <label for="filter-volume-primary">Steam 24小时成交(≥)</label>
                                 <input class="input input-compact input-tile" type="number" id="filter-volume-primary" min="0" max="999" value="20">
                             </div>
                             <div class="field field-compact">
@@ -405,7 +407,7 @@
                                         <th><button type="button" data-sort-key="steam_sell_ratio">出售价比例</button></th>
                                         <th><button type="button" data-sort-key="buff_sell_num">BUFF 在售数</button></th>
                                         <th><button type="button" data-sort-key="steam_sell_num">Steam 在售数</button></th>
-                                        <th><button type="button" data-sort-key="steam_volume">Steam 成交量</button></th>
+                                        <th><button type="button" data-sort-key="steam_volume">Steam 24小时成交</button></th>
                                         <th><button type="button" data-sort-key="update_time">更新时间</button></th>
                                     </tr>
                                 </thead>

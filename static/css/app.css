@@ -646,7 +646,7 @@ select {
 
 .settings-metrics {
     display: grid;
-    grid-template-columns: repeat(4, minmax(92px, 112px));
+    grid-template-columns: repeat(3, minmax(92px, 112px));
     gap: 14px;
     align-items: end;
 }

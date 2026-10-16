@@ -377,12 +377,10 @@ def get_saved_settings():
 def save_settings(config):
     allowed_keys = {
         "proxy_url",
-        "max_threads",
         "game_type",
         "min_sell_price",
         "max_sell_price",
         "min_sell_count",
-        "web_auth",
     }
     filtered = {key: config.get(key) for key in allowed_keys if key in config}
     filtered["updated_at"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -401,12 +399,10 @@ def merge_runtime_config(request_config):
 
     merged = {
         "proxy_url": str(request_config.get("proxy_url") or saved_settings.get("proxy_url") or "").strip(),
-        "max_threads": str(request_config.get("max_threads") or saved_settings.get("max_threads") or "2"),
         "game_type": request_config.get("game_type") or saved_settings.get("game_type") or "CSGO",
         "min_sell_price": str(request_config.get("min_sell_price") or saved_settings.get("min_sell_price") or "25"),
         "max_sell_price": str(request_config.get("max_sell_price") or saved_settings.get("max_sell_price") or "300"),
         "min_sell_count": str(request_config.get("min_sell_count") or saved_settings.get("min_sell_count") or "20"),
-        "web_auth": bool(request_config.get("web_auth") if "web_auth" in request_config else saved_settings.get("web_auth", False)),
         "buff_auth": str(request_config.get("buff_auth") or saved_credentials.get("buff_auth") or "").strip(),
         "steam_cookies": str(request_config.get("steam_cookies") or saved_credentials.get("steam_cookies") or "").strip(),
     }
@@ -441,12 +437,10 @@ def build_credentials_status():
         },
         "settings": {
             "proxy_url": saved_settings.get("proxy_url", ""),
-            "max_threads": saved_settings.get("max_threads", "2"),
             "game_type": saved_settings.get("game_type", "CSGO"),
             "min_sell_price": saved_settings.get("min_sell_price", "25"),
             "max_sell_price": saved_settings.get("max_sell_price", "300"),
             "min_sell_count": saved_settings.get("min_sell_count", "20"),
-            "web_auth": bool(saved_settings.get("web_auth", False)),
             "updated_at": saved_settings.get("updated_at"),
         },
         "credentials_updated_at": saved_credentials.get("updated_at"),

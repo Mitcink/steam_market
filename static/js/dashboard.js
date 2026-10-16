@@ -74,11 +74,9 @@
 
     const configFieldIds = [
         "proxy-url",
-        "max-threads",
         "min-sell-count",
         "min-sell-price",
         "max-sell-price",
-        "web-auth",
         "buff-steamid",
         "buff-pay-method",
         "buff-allow-cooldown",
@@ -312,24 +310,20 @@
             proxy_url: document.getElementById("proxy-url")?.value.trim() || "",
             buff_auth: document.getElementById("buff-auth")?.value.trim() || "",
             steam_cookies: document.getElementById("steam-cookies")?.value.trim() || "",
-            max_threads: document.getElementById("max-threads")?.value || "2",
             game_type: document.querySelector('input[name="game_type"]:checked')?.value || "CSGO",
             min_sell_price: document.getElementById("min-sell-price")?.value || "25",
             max_sell_price: document.getElementById("max-sell-price")?.value || "300",
             min_sell_count: document.getElementById("min-sell-count")?.value || "20",
-            web_auth: document.getElementById("web-auth")?.checked || false,
         };
     }
 
     function splitLocalConfig(config) {
         return {
             proxy_url: config.proxy_url,
-            max_threads: config.max_threads,
             game_type: config.game_type,
             min_sell_price: config.min_sell_price,
             max_sell_price: config.max_sell_price,
             min_sell_count: config.min_sell_count,
-            web_auth: config.web_auth,
         };
     }
 
@@ -393,7 +387,6 @@
     function applyConfigToForm(config) {
         const mapping = {
             "proxy-url": config.proxy_url,
-            "max-threads": config.max_threads,
             "min-sell-count": config.min_sell_count,
             "min-sell-price": config.min_sell_price,
             "max-sell-price": config.max_sell_price,
@@ -405,11 +398,6 @@
                 element.value = value;
             }
         });
-
-        const webAuth = document.getElementById("web-auth");
-        if (webAuth) {
-            webAuth.checked = Boolean(config.web_auth);
-        }
 
         const radio = document.querySelector(`input[name="game_type"][value="${config.game_type || "CSGO"}"]`);
         if (radio) {

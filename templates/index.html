@@ -176,14 +176,8 @@
                         </div>
                         <div class="settings-metrics settings-metrics-centered">
                             <div class="field field-compact">
-                                <label for="max-threads">线程数</label>
-                                <input class="input input-compact" type="number" id="max-threads" min="1" max="99" value="2">
-                                <span class="field-hint">抓取固定单线程，这个值不会生效。</span>
-                            </div>
-                            <div class="field field-compact">
                                 <label for="min-sell-count">BUFF 在售数</label>
                                 <input class="input input-compact" type="number" id="min-sell-count" min="0" max="999" value="20">
-                                <span class="field-hint">只看 BUFF 当前挂单，不是 Steam 成交量。</span>
                             </div>
                             <div class="field field-compact">
                                 <label for="min-sell-price">BUFF 最低价</label>
@@ -258,17 +252,6 @@
                                 <span class="field-hint">保存成功后，输入框会被主动清空，表示凭证已转存到服务器，不会在页面上明文回显。后续如果检测失败，通常表示 Cookie 已失效；重新粘贴新的 Steam Cookie 并保存，会直接覆盖旧值。</span>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="checkbox-card">
-                        <div class="copy">
-                            <strong>网页验证开关</strong>
-                            <span>当前后端暂未深度消费该参数，保留为后续扩展项。</span>
-                        </div>
-                        <label class="switch" for="web-auth">
-                            <input id="web-auth" type="checkbox">
-                            <span class="switch-track"></span>
-                        </label>
                     </div>
                 </div>
             </article>

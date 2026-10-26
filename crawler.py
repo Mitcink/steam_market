@@ -1,7 +1,8 @@
 """BUFF 列表扫描 + 少量 Steam 补全。
 
 比例先用 BUFF 上的 Steam 参考价判断。Steam 的 priceoverview 每轮最多请求 20 次，
-结果缓存 6 小时。额度用完或连续 429 时停在当前页，下一轮从这一页继续。
+结果缓存 6 小时。额度用完或连续 429 时停在当前页，短时间内从这一页继续。
+进度超过 12 小时没有更新，则从第 1 页重新扫描。
 """
 
 import random
@@ -29,6 +30,8 @@ ROUND_PAUSE_SECONDS = 180
 # 额度用完就停在当前页，不要把后面的列表空跑完。
 STEAM_CALLS_PER_ROUND = 20
 STEAM_CACHE_TTL_SECONDS = 6 * 60 * 60
+# 连续扫描时每轮都会刷新这个时间；停超过 12 小时再启动就从头扫。
+CATALOG_RESUME_TTL_SECONDS = 12 * 60 * 60
 STEAM_MIN_INTERVAL = 8.0
 STEAM_429_RETRIES = 3
 
@@ -285,7 +288,8 @@ class MarketCrawler:
             f"参考价比例高于 {REFERENCE_SKIP_RATIO} 才跳过 Steam。"
             "Steam 价格和成交量优先用 6 小时内的缓存。"
             f"每轮最多新请求 {STEAM_CALLS_PER_ROUND} 次，间隔约 {STEAM_MIN_INTERVAL:.0f} 秒。"
-            "额度用完或连续 429 就停在当前页，下一轮从这一页继续。"
+            "额度用完或连续 429 就停在当前页，短时间内从这一页继续。"
+            f"进度超过 {CATALOG_RESUME_TTL_SECONDS // 3600} 小时没有更新，则从第 1 页重新扫描。"
         )
 
         while not self.should_stop():
@@ -759,11 +763,27 @@ class MarketCrawler:
             page = int(self._state_get("catalog_page") or 1)
         except (TypeError, ValueError):
             return 1
-        return page if page >= 1 else 1
+        if page <= 1:
+            return 1
+
+        age = quote_age_seconds(self._state_get("catalog_page_saved_at"))
+        if age is None or age > CATALOG_RESUME_TTL_SECONDS:
+            limit_hours = CATALOG_RESUME_TTL_SECONDS // 3600
+            if age is None:
+                self.log(f"上次停在第 {page} 页，但没有记录时间，从第 1 页重新开始。")
+            else:
+                self.log(
+                    f"上次停在第 {page} 页，已过去 {age / 3600:.1f} 小时，"
+                    f"超过 {limit_hours} 小时，从第 1 页重新开始。"
+                )
+            self._save_resume_page(1)
+            return 1
+        return page
 
     def _save_resume_page(self, page_num):
         self._state_set("catalog_signature", self._catalog_signature())
         self._state_set("catalog_page", str(max(int(page_num), 1)))
+        self._state_set("catalog_page_saved_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     def _store_quote(self, steam_market_id, **fields):
         current = dict(self.quotes.get(steam_market_id) or {})
